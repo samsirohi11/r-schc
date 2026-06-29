@@ -1,0 +1,39 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "ietf-schc",
+    "item": [
+      { "namespace": "identity", "identifier": "fid-ipv6-version", "sid": 1000 },
+      { "namespace": "identity", "identifier": "fid-ipv6-trafficclass", "sid": 1001 },
+      { "namespace": "identity", "identifier": "fid-ipv6-flowlabel", "sid": 1002 },
+      { "namespace": "identity", "identifier": "fid-ipv6-payload-length", "sid": 1003 },
+      { "namespace": "identity", "identifier": "fid-ipv6-nextheader", "sid": 1004 },
+      { "namespace": "identity", "identifier": "fid-ipv6-hoplimit", "sid": 1005 },
+      { "namespace": "identity", "identifier": "fid-ipv6-devprefix", "sid": 1006 },
+      { "namespace": "identity", "identifier": "fid-ipv6-deviid", "sid": 1007 },
+      { "namespace": "identity", "identifier": "fid-ipv6-appprefix", "sid": 1008 },
+      { "namespace": "identity", "identifier": "fid-ipv6-appiid", "sid": 1009 },
+      { "namespace": "identity", "identifier": "fid-udp-dev-port", "sid": 1100 },
+      { "namespace": "identity", "identifier": "fid-udp-app-port", "sid": 1101 },
+      { "namespace": "identity", "identifier": "fid-udp-length", "sid": 1102 },
+      { "namespace": "identity", "identifier": "fid-udp-checksum", "sid": 1103 },
+      { "namespace": "identity", "identifier": "fid-coap-version", "sid": 1200 },
+      { "namespace": "identity", "identifier": "fid-coap-type", "sid": 1201 },
+      { "namespace": "identity", "identifier": "fid-coap-tkl", "sid": 1202 },
+      { "namespace": "identity", "identifier": "fid-coap-code", "sid": 1203 },
+      { "namespace": "identity", "identifier": "fid-coap-mid", "sid": 1204 },
+      { "namespace": "identity", "identifier": "fid-coap-token", "sid": 1205 },
+      { "namespace": "identity", "identifier": "mo-equal", "sid": 2000 },
+      { "namespace": "identity", "identifier": "mo-ignore", "sid": 2001 },
+      { "namespace": "identity", "identifier": "mo-msb", "sid": 2002 },
+      { "namespace": "identity", "identifier": "mo-match-mapping", "sid": 2003 },
+      { "namespace": "identity", "identifier": "cda-not-sent", "sid": 3000 },
+      { "namespace": "identity", "identifier": "cda-value-sent", "sid": 3001 },
+      { "namespace": "identity", "identifier": "cda-mapping-sent", "sid": 3002 },
+      { "namespace": "identity", "identifier": "cda-lsb", "sid": 3003 },
+      { "namespace": "identity", "identifier": "cda-compute", "sid": 3004 },
+      { "namespace": "identity", "identifier": "di-bidirectional", "sid": 4000 },
+      { "namespace": "identity", "identifier": "di-up", "sid": 4001 },
+      { "namespace": "identity", "identifier": "di-down", "sid": 4002 }
+    ]
+  }
+}
