@@ -47,12 +47,20 @@ struct SidFile {
 
 impl SidRegistry {
     /// Loads a SID registry from a JSON file at `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::Json`] when the file cannot be read or parsed.
     pub fn load_path(path: impl AsRef<Path>) -> Result<Self> {
         let data = fs::read_to_string(path).map_err(|error| SchcError::Json(error.to_string()))?;
         Self::from_json_str(&data)
     }
 
     /// Loads a SID registry from a standard SID JSON document.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::Json`] when `data` is not valid SID JSON.
     pub fn from_json_str(data: &str) -> Result<Self> {
         let envelope: SidFileEnvelope =
             serde_json::from_str(data).map_err(|error| SchcError::Json(error.to_string()))?;
@@ -83,6 +91,11 @@ impl SidRegistry {
     }
 
     /// Resolves an identifier to its numeric SID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::MissingSidIdentifier`] when `identifier` is not in the
+    /// registry.
     pub fn sid(&self, identifier: &str) -> Result<u64> {
         self.by_identifier
             .get(identifier)
@@ -93,6 +106,10 @@ impl SidRegistry {
     }
 
     /// Resolves a numeric SID to its identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::UnknownSid`] when `sid` is not in the registry.
     pub fn identifier(&self, sid: u64) -> Result<&str> {
         self.by_sid
             .get(&sid)

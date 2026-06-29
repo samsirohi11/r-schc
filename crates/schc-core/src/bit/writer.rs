@@ -9,16 +9,23 @@ pub struct BitWriter {
 
 impl BitWriter {
     /// Creates an empty writer.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Returns the number of bits written.
+    #[must_use]
     pub fn bit_len(&self) -> usize {
         self.bit_len
     }
 
     /// Writes the low `bits` bits of `value`, most significant bit first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::InvalidBitLength`] when `bits` is zero, greater than
+    /// 64, or when `value` does not fit in `bits`.
     pub fn write_bits(&mut self, value: u64, bits: usize) -> Result<()> {
         validate_bit_width("write_bits", bits)?;
         if !value_fits(value, bits) {
@@ -36,6 +43,11 @@ impl BitWriter {
     }
 
     /// Truncates the buffer to `bits` bits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::BitOutOfBounds`] when `bits` is greater than the
+    /// current bit length.
     pub fn truncate_bits(&mut self, bits: usize) -> Result<()> {
         if bits > self.bit_len {
             return Err(SchcError::BitOutOfBounds {
@@ -57,6 +69,7 @@ impl BitWriter {
     }
 
     /// Returns the written bytes with the final byte padded by zero bits.
+    #[must_use]
     pub fn to_vec(&self) -> Vec<u8> {
         let mut bytes = self.bytes.clone();
         bytes.truncate(self.bit_len.div_ceil(8));

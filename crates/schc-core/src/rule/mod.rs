@@ -1,33 +1,10 @@
-//! SCHC rule model.
+//! SCHC rule model and loading support.
 
-/// Packet flow direction for a SCHC rule field.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum Direction {
-    /// Uplink direction.
-    Up,
-    /// Downlink direction.
-    Down,
-}
+mod load;
+mod model;
 
-/// Runtime layer position for a SCHC rule field.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum Position {
-    /// Device-side position.
-    Device,
-    /// Core-network position.
-    Core,
-    /// Application-side position.
-    App,
-}
-
-/// Public rule context placeholder reserved for rule processing implementation.
-#[derive(Debug)]
-pub struct RuleContext {
-    _private: (),
-}
-
-/// Public rule set placeholder reserved for rule loading implementation.
-#[derive(Debug)]
-pub struct RuleSet {
-    _private: (),
-}
+pub use load::RuleContext;
+pub use model::{
+    Cda, Direction, DirectionSelector, FieldLength, FieldRef, FieldRule, LengthUnit,
+    MatchingOperator, Position, Rule, RuleId, RuleSet, TargetValue,
+};

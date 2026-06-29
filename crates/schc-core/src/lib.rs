@@ -15,5 +15,8 @@ pub mod tree;
 pub use compress::Compressor;
 pub use decompress::Decompressor;
 pub use error::{Result, SchcError};
-pub use rule::{Direction, Position, RuleContext, RuleSet};
+pub use rule::{
+    Cda, Direction, DirectionSelector, FieldLength, FieldRef, MatchingOperator, Position, Rule,
+    RuleContext, RuleId, RuleSet, TargetValue,
+};
 pub use sid::SidRegistry;

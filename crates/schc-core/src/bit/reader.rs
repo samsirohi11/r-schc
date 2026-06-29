@@ -9,26 +9,35 @@ pub struct BitReader<'a> {
 
 impl<'a> BitReader<'a> {
     /// Creates a reader at bit position zero.
+    #[must_use]
     pub fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, position: 0 }
     }
 
     /// Returns the current bit position.
+    #[must_use]
     pub fn position(&self) -> usize {
         self.position
     }
 
     /// Returns the total number of readable bits.
+    #[must_use]
     pub fn bit_len(&self) -> usize {
         self.bytes.len() * 8
     }
 
     /// Returns the number of bits remaining from the current position.
+    #[must_use]
     pub fn remaining(&self) -> usize {
         self.bit_len() - self.position
     }
 
     /// Sets the current bit position.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::BitOutOfBounds`] if `position` is past the end of the
+    /// backing byte slice.
     pub fn set_position(&mut self, position: usize) -> Result<()> {
         if position > self.bit_len() {
             return Err(SchcError::BitOutOfBounds {
@@ -43,6 +52,13 @@ impl<'a> BitReader<'a> {
     }
 
     /// Reads up to 64 bits as a `u64`, most significant bit first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::InvalidBitLength`] when `bits` is zero or greater than
+    /// 64.
+    /// Returns [`SchcError::BitOutOfBounds`] when the requested bits are not
+    /// available.
     pub fn read_bits(&mut self, bits: usize) -> Result<u64> {
         validate_bit_width("read_bits", bits)?;
         self.ensure_available(bits)?;
@@ -56,6 +72,11 @@ impl<'a> BitReader<'a> {
     }
 
     /// Reads bits into bytes and pads the final byte with zero bits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::BitOutOfBounds`] when the requested bits are not
+    /// available.
     pub fn read_bytes_padded(&mut self, bits: usize) -> Result<Vec<u8>> {
         self.ensure_available(bits)?;
 
