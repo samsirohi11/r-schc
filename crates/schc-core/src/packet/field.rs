@@ -2,6 +2,80 @@
 
 use crate::bit::{BitReader, BitWriter};
 use crate::error::{Result, SchcError};
+use crate::rule::FieldRef;
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[allow(dead_code)]
+pub(crate) struct FieldKey {
+    field: FieldRef,
+    field_position: usize,
+    entry_index: usize,
+}
+
+impl FieldKey {
+    #[allow(dead_code)]
+    pub(crate) fn new(field: FieldRef, field_position: usize, entry_index: usize) -> Self {
+        Self {
+            field,
+            field_position,
+            entry_index,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn field(&self) -> &FieldRef {
+        &self.field
+    }
+
+    #[allow(dead_code)]
+    pub(crate) const fn entry_index(&self) -> usize {
+        self.entry_index
+    }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[allow(dead_code)]
+pub(crate) struct FieldStore {
+    values: Vec<(FieldKey, FieldValue)>,
+}
+
+impl FieldStore {
+    #[allow(dead_code)]
+    pub(crate) fn insert(&mut self, key: FieldKey, value: FieldValue) {
+        self.values.push((key, value));
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get(&self, key: &FieldKey) -> Option<&FieldValue> {
+        self.values
+            .iter()
+            .find_map(|(candidate, value)| (candidate == key).then_some(value))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn by_entry_index(&self, entry_index: usize) -> Option<&FieldValue> {
+        self.values
+            .iter()
+            .find_map(|(key, value)| (key.entry_index() == entry_index).then_some(value))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn by_field<'a>(
+        &'a self,
+        field: &'a FieldRef,
+    ) -> impl Iterator<Item = (&'a FieldKey, &'a FieldValue)> + 'a {
+        self.values
+            .iter()
+            .filter_map(move |(key, value)| (key.field() == field).then_some((key, value)))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn first_by_field(&self, field: &FieldRef) -> Option<&FieldValue> {
+        self.values
+            .iter()
+            .find_map(|(key, value)| (key.field() == field).then_some(value))
+    }
+}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct FieldValue {
@@ -93,8 +167,9 @@ impl FieldValue {
 
 #[cfg(test)]
 mod tests {
-    use super::FieldValue;
+    use super::{FieldKey, FieldStore, FieldValue};
     use crate::bit::{BitReader, BitWriter};
+    use crate::rule::FieldRef;
 
     #[test]
     fn writes_non_byte_aligned_value() {
@@ -131,5 +206,28 @@ mod tests {
     #[test]
     fn rejects_non_zero_unused_bits() {
         assert!(FieldValue::from_bytes(vec![0b0001_0000], 3).is_err());
+    }
+
+    #[test]
+    fn field_store_preserves_repeated_fields_by_entry_index() {
+        let mut store = FieldStore::default();
+        let first = FieldKey::new(FieldRef::CoapOption { number: 11 }, 1, 20);
+        let second = FieldKey::new(FieldRef::CoapOption { number: 11 }, 2, 21);
+
+        store.insert(
+            first.clone(),
+            FieldValue::from_bytes(b"sensors".to_vec(), 56).unwrap(),
+        );
+        store.insert(
+            second.clone(),
+            FieldValue::from_bytes(b"temp".to_vec(), 32).unwrap(),
+        );
+
+        assert_eq!(store.get(&first).unwrap().bytes(), b"sensors");
+        assert_eq!(store.get(&second).unwrap().bytes(), b"temp");
+        assert_eq!(
+            store.by_field(&FieldRef::CoapOption { number: 11 }).count(),
+            2
+        );
     }
 }

@@ -72,7 +72,7 @@ impl RuleId {
 }
 
 /// SCHC field identifier resolved from a SID field identity.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum FieldRef {
     /// IPv6 field identity.
     Ipv6(&'static str),

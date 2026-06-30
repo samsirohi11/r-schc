@@ -1,6 +1,7 @@
 //! Packet parsing and serialization.
 
 pub(crate) mod field;
+pub(crate) mod length;
 
 mod coap;
 mod icmpv6;
