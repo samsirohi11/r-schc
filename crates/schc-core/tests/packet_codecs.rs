@@ -4,7 +4,7 @@ use schc_core::packet::{CoapMessage, Icmpv6Message, Ipv6Packet, UdpDatagram};
 fn ipv6_udp_coap_packet_round_trips() {
     let packet = hex::decode(
         "60000000000c114020010db8000000000000000000000001\
-         20010db800000000000000000000000216331633000c0000\
+         20010db800000000000000000000000216331633000c37d0\
          4001002a",
     )
     .unwrap();

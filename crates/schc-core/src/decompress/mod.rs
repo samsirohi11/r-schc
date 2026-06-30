@@ -1,7 +1,5 @@
-//! SCHC decompression entry points.
+//! SCHC decompression.
 
-/// Public decompressor handle reserved for the decompression module implementation.
-#[derive(Debug)]
-pub struct Decompressor {
-    _private: (),
-}
+mod engine;
+
+pub use engine::Decompressor;

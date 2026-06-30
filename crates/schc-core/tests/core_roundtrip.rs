@@ -1,4 +1,6 @@
-use schc_core::{Compressor, Direction, RuleContext, SchcError, SidRegistry};
+use schc_core::{
+    Compressor, Decompressor, Direction, Position, RuleContext, SchcError, SidRegistry,
+};
 
 fn sid_fixture() -> &'static str {
     concat!(
@@ -25,7 +27,7 @@ fn compressor() -> Compressor {
 fn coap_get_packet() -> Vec<u8> {
     hex::decode(
         "60000000000c114020010db8000000000000000000000001\
-         20010db800000000000000000000000216331633000c0000\
+         20010db800000000000000000000000216331633000c37d0\
          4001002a",
     )
     .unwrap()
@@ -52,4 +54,21 @@ fn compressor_reports_no_matching_rule_for_equal_mismatch() {
     let error = compressor.compress(Direction::Up, &packet).unwrap_err();
 
     assert!(matches!(error, SchcError::NoMatchingRule));
+}
+
+#[test]
+fn compress_then_decompress_restores_ipv6_udp_coap_packet() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = std::fs::read_to_string(rule_fixture()).unwrap();
+    let context = RuleContext::from_json_str(&json, registry).unwrap();
+    let packet = coap_get_packet();
+
+    let compressor = Compressor::new(context.clone()).unwrap();
+    let compressed = compressor.compress(Direction::Up, &packet).unwrap();
+    let decompressor = Decompressor::new(context).unwrap();
+    let restored = decompressor
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+
+    assert_eq!(restored, packet);
 }

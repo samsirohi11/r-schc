@@ -47,7 +47,7 @@ fn json_rules_load_into_typed_context() {
     assert_eq!(context.rules().rules().len(), 1);
     assert_eq!(context.rules().rules()[0].id().value(), 3);
     assert_eq!(context.rules().rules()[0].id().bit_len(), 4);
-    assert_eq!(context.rules().rules()[0].fields().len(), 15);
+    assert_eq!(context.rules().rules()[0].fields().len(), 19);
 }
 
 #[test]
