@@ -161,7 +161,8 @@ fn fixed_field_len(length: &FieldLength) -> Result<usize> {
         FieldLength::FixedBits(bits) => Ok(*bits),
         FieldLength::VariableBytes
         | FieldLength::TokenLength
-        | FieldLength::FromPreviousField { .. } => Err(SchcError::InvalidResidue(
+        | FieldLength::FromPreviousField { .. }
+        | FieldLength::FunctionSid(_) => Err(SchcError::InvalidResidue(
             "decompression only supports fixed-length fields for this task".to_owned(),
         )),
     }

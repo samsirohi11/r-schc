@@ -162,6 +162,10 @@ fn push_field_length(output: &mut Vec<u8>, length: &FieldLength) {
                 LengthUnit::Bits => 1,
             });
         }
+        FieldLength::FunctionSid(sid) => {
+            output.push(4);
+            output.extend_from_slice(&sid.to_be_bytes());
+        }
     }
 }
 

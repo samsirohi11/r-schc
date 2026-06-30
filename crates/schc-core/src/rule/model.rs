@@ -118,6 +118,8 @@ pub enum FieldLength {
         /// Unit used by the previous field value.
         unit: LengthUnit,
     },
+    /// CORECONF field-length function identified by SID.
+    FunctionSid(u64),
 }
 
 /// Target value attached to a field rule entry.

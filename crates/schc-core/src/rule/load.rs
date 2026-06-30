@@ -1,5 +1,8 @@
-//! JSON loading for typed SCHC rules.
+//! JSON and CBOR loading for typed SCHC rules.
 
+use std::{io::Cursor, mem::size_of};
+
+use ciborium::value::Value;
 use serde::Deserialize;
 
 use crate::error::{Result, SchcError};
@@ -91,11 +94,78 @@ impl RuleContext {
         })
     }
 
+    /// Loads a typed rule context from a CORECONF CBOR rule document.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::Cbor`] when `data` is not valid CBOR.
+    /// Returns [`SchcError::InvalidRule`] or [`SchcError::InvalidRuleField`] when
+    /// the decoded rule structure is invalid or references missing SID values.
+    pub fn from_cbor_slice(data: &[u8], sid_registry: SidRegistry) -> Result<Self> {
+        let root: Value = ciborium::de::from_reader(Cursor::new(data))
+            .map_err(|error| SchcError::Cbor(error.to_string()))?;
+        let envelope = required_map_value(&root, 2574)
+            .map_err(|reason| SchcError::Cbor(format!("missing CORECONF root 2574: {reason}")))?;
+        let rule_values = required_array(envelope, 23)
+            .map_err(|reason| SchcError::Cbor(format!("invalid rule list key 23: {reason}")))?;
+        let mut rules = Vec::with_capacity(rule_values.len());
+
+        for (rule_index, rule_value) in rule_values.iter().enumerate() {
+            let rule_id_length =
+                required_usize(rule_value, 1).map_err(|reason| SchcError::InvalidRule {
+                    rule_index,
+                    reason: format!("invalid rule ID length key 1: {reason}"),
+                })?;
+            let rule_id = required_u64(rule_value, 2).map_err(|reason| SchcError::InvalidRule {
+                rule_index,
+                reason: format!("invalid rule ID value key 2: {reason}"),
+            })?;
+            validate_rule_id(rule_index, rule_id, rule_id_length)?;
+
+            let entry_values =
+                required_array(rule_value, 23).map_err(|reason| SchcError::InvalidRule {
+                    rule_index,
+                    reason: format!("invalid entry list key 23: {reason}"),
+                })?;
+            let mut fields = Vec::with_capacity(entry_values.len());
+            for (entry_order, entry_value) in entry_values.iter().enumerate() {
+                fields.push(load_cbor_field(
+                    &sid_registry,
+                    rule_index,
+                    entry_order,
+                    entry_value,
+                )?);
+            }
+
+            rules.push(Rule::new(RuleId::new(rule_id, rule_id_length), fields));
+        }
+
+        Ok(Self {
+            rules: RuleSet::new(rules, sid_registry),
+        })
+    }
+
     /// Returns the loaded rule set.
     #[must_use]
     pub fn rules(&self) -> &RuleSet {
         &self.rules
     }
+}
+
+fn validate_rule_id(rule_index: usize, rule_id: u64, rule_id_length: usize) -> Result<()> {
+    if rule_id_length == 0 || rule_id_length > 64 {
+        return Err(SchcError::InvalidRule {
+            rule_index,
+            reason: format!("rule_id_length {rule_id_length} is invalid"),
+        });
+    }
+    if rule_id_length < 64 && rule_id >= (1_u64 << rule_id_length) {
+        return Err(SchcError::InvalidRule {
+            rule_index,
+            reason: format!("rule_id {rule_id} does not fit in {rule_id_length} bits"),
+        });
+    }
+    Ok(())
 }
 
 fn load_field(
@@ -126,6 +196,458 @@ fn load_field(
         action: cda(sid_registry, rule_index, entry_index, &json_field.cda)?,
         entry_index,
     })
+}
+
+fn load_cbor_field(
+    sid_registry: &SidRegistry,
+    rule_index: usize,
+    entry_order: usize,
+    value: &Value,
+) -> Result<FieldRule> {
+    if map_value(value, -5).is_some() {
+        load_cbor_universal_option_field(sid_registry, rule_index, entry_order, value)
+    } else {
+        load_cbor_normal_field(sid_registry, rule_index, entry_order, value)
+    }
+}
+
+fn load_cbor_normal_field(
+    sid_registry: &SidRegistry,
+    rule_index: usize,
+    entry_order: usize,
+    value: &Value,
+) -> Result<FieldRule> {
+    let entry_index = required_field_usize(value, 1, rule_index, entry_order)?;
+    let field_sid = required_field_u64(value, 3, rule_index, entry_order)?;
+    let field_identifier =
+        sid_identifier(sid_registry, rule_index, entry_order, "field", field_sid)?;
+    let length = cbor_field_length(value, 4, rule_index, entry_order)?;
+    let direction = cbor_direction_selector(
+        sid_registry,
+        rule_index,
+        entry_order,
+        required_field_u64(value, 6, rule_index, entry_order)?,
+    )?;
+    require_optional_field_value(value, 7, rule_index, entry_order)?;
+    let target = cbor_target_value(
+        required_field_value(value, 8, rule_index, entry_order)?,
+        rule_index,
+        entry_order,
+    )?;
+    let matching = cbor_matching_operator(
+        sid_registry,
+        rule_index,
+        entry_order,
+        required_field_u64(value, 11, rule_index, entry_order)?,
+        map_value(value, 12),
+    )?;
+    let action = cbor_cda(
+        sid_registry,
+        rule_index,
+        entry_order,
+        required_field_u64(value, 15, rule_index, entry_order)?,
+    )?;
+
+    Ok(FieldRule {
+        field: field_ref(&field_identifier, field_sid),
+        length,
+        direction,
+        target,
+        matching,
+        action,
+        entry_index,
+    })
+}
+
+fn load_cbor_universal_option_field(
+    sid_registry: &SidRegistry,
+    rule_index: usize,
+    entry_order: usize,
+    value: &Value,
+) -> Result<FieldRule> {
+    let entry_index = required_field_usize(value, -1, rule_index, entry_order)?;
+    let option_number = required_field_u16(value, -5, rule_index, entry_order)?;
+    let length = cbor_field_length(value, -11, rule_index, entry_order)?;
+    let direction = cbor_direction_selector(
+        sid_registry,
+        rule_index,
+        entry_order,
+        required_field_u64(value, -12, rule_index, entry_order)?,
+    )?;
+    require_optional_field_value(value, -10, rule_index, entry_order)?;
+    let target = cbor_target_value(
+        required_field_value(value, -3, rule_index, entry_order)?,
+        rule_index,
+        entry_order,
+    )?;
+    let matching = cbor_matching_operator(
+        sid_registry,
+        rule_index,
+        entry_order,
+        required_field_u64(value, -9, rule_index, entry_order)?,
+        map_value(value, -8),
+    )?;
+    let action = cbor_cda(
+        sid_registry,
+        rule_index,
+        entry_order,
+        required_field_u64(value, -16, rule_index, entry_order)?,
+    )?;
+
+    Ok(FieldRule {
+        field: FieldRef::CoapOption {
+            number: option_number,
+        },
+        length,
+        direction,
+        target,
+        matching,
+        action,
+        entry_index,
+    })
+}
+
+fn cbor_field_length(
+    value: &Value,
+    key: i128,
+    rule_index: usize,
+    entry_index: usize,
+) -> Result<FieldLength> {
+    let value = required_field_value(value, key, rule_index, entry_index)?;
+    match value {
+        Value::Integer(integer) => {
+            let bits = usize::try_from(*integer).map_err(|_| {
+                invalid_field(
+                    rule_index,
+                    entry_index,
+                    format!("field length key {key} is not a valid usize"),
+                )
+            })?;
+            Ok(FieldLength::FixedBits(bits))
+        }
+        Value::Tag(45, boxed) => {
+            let sid = value_to_u64(boxed).map_err(|reason| {
+                invalid_field(
+                    rule_index,
+                    entry_index,
+                    format!("unsupported field-length function tag 45: {reason}"),
+                )
+            })?;
+            Ok(FieldLength::FunctionSid(sid))
+        }
+        _ => Err(invalid_field(
+            rule_index,
+            entry_index,
+            format!("field length key {key} must be an integer"),
+        )),
+    }
+}
+
+fn cbor_direction_selector(
+    sid_registry: &SidRegistry,
+    rule_index: usize,
+    entry_index: usize,
+    sid: u64,
+) -> Result<DirectionSelector> {
+    match sid_identifier(sid_registry, rule_index, entry_index, "direction", sid)?.as_str() {
+        "di-bidirectional" => Ok(DirectionSelector::Bidirectional),
+        "di-up" => Ok(DirectionSelector::Up),
+        "di-down" => Ok(DirectionSelector::Down),
+        identifier => Err(invalid_field(
+            rule_index,
+            entry_index,
+            format!("unknown direction SID {sid} identifier {identifier}"),
+        )),
+    }
+}
+
+fn cbor_matching_operator(
+    sid_registry: &SidRegistry,
+    rule_index: usize,
+    entry_index: usize,
+    sid: u64,
+    value_list: Option<&Value>,
+) -> Result<MatchingOperator> {
+    match sid_identifier(sid_registry, rule_index, entry_index, "mo", sid)?.as_str() {
+        "mo-equal" => Ok(MatchingOperator::Equal),
+        "mo-ignore" => Ok(MatchingOperator::Ignore),
+        "mo-match-mapping" => Ok(MatchingOperator::MatchMapping),
+        "mo-msb" => {
+            let Some(value_list) = value_list else {
+                return Err(invalid_field(
+                    rule_index,
+                    entry_index,
+                    "mo-msb requires a matching-operator value list".to_owned(),
+                ));
+            };
+            let bits = cbor_target_entries(value_list, rule_index, entry_index)?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    invalid_field(
+                        rule_index,
+                        entry_index,
+                        "mo-msb matching-operator value list is empty".to_owned(),
+                    )
+                })?;
+            let bytes = value_to_bytes(bits.1, rule_index, entry_index)?;
+            Ok(MatchingOperator::Msb(bytes_to_usize(&bytes).ok_or_else(
+                || {
+                    invalid_field(
+                        rule_index,
+                        entry_index,
+                        "mo-msb value does not fit usize".to_owned(),
+                    )
+                },
+            )?))
+        }
+        identifier => Err(invalid_field(
+            rule_index,
+            entry_index,
+            format!("unsupported matching operator SID {sid} identifier {identifier}"),
+        )),
+    }
+}
+
+fn cbor_cda(
+    sid_registry: &SidRegistry,
+    rule_index: usize,
+    entry_index: usize,
+    sid: u64,
+) -> Result<Cda> {
+    match sid_identifier(sid_registry, rule_index, entry_index, "cda", sid)?.as_str() {
+        "cda-not-sent" => Ok(Cda::NotSent),
+        "cda-value-sent" => Ok(Cda::ValueSent),
+        "cda-mapping-sent" => Ok(Cda::MappingSent),
+        "cda-lsb" => Ok(Cda::Lsb),
+        "cda-compute" => Ok(Cda::Compute),
+        identifier => Err(invalid_field(
+            rule_index,
+            entry_index,
+            format!("unsupported CDA SID {sid} identifier {identifier}"),
+        )),
+    }
+}
+
+fn cbor_target_value(value: &Value, rule_index: usize, entry_index: usize) -> Result<TargetValue> {
+    if matches!(value, Value::Null) {
+        return Ok(TargetValue::None);
+    }
+
+    let mut entries = cbor_target_entries(value, rule_index, entry_index)?;
+    entries.sort_by_key(|(index, _)| *index);
+    let mut values = Vec::with_capacity(entries.len());
+    for (_, value) in entries {
+        values.push(value_to_bytes(value, rule_index, entry_index)?);
+    }
+
+    match values.len() {
+        0 => Ok(TargetValue::None),
+        1 => Ok(TargetValue::Bytes(values.remove(0))),
+        _ => Ok(TargetValue::Mapping(values)),
+    }
+}
+
+fn cbor_target_entries(
+    value: &Value,
+    rule_index: usize,
+    entry_index: usize,
+) -> Result<Vec<(usize, &Value)>> {
+    let Value::Array(entries) = value else {
+        return Err(invalid_field(
+            rule_index,
+            entry_index,
+            "target-value list must be an array".to_owned(),
+        ));
+    };
+    let mut parsed = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let index = required_field_usize(entry, 1, rule_index, entry_index)?;
+        let value = required_field_value(entry, 2, rule_index, entry_index)?;
+        parsed.push((index, value));
+    }
+    Ok(parsed)
+}
+
+fn value_to_bytes(value: &Value, rule_index: usize, entry_index: usize) -> Result<Vec<u8>> {
+    match value {
+        Value::Bytes(bytes) => Ok(bytes.clone()),
+        Value::Integer(integer) => integer_to_minimal_bytes(*integer).ok_or_else(|| {
+            invalid_field(
+                rule_index,
+                entry_index,
+                "negative target integers are not supported".to_owned(),
+            )
+        }),
+        _ => Err(invalid_field(
+            rule_index,
+            entry_index,
+            "target values must be byte strings or integers".to_owned(),
+        )),
+    }
+}
+
+fn integer_to_minimal_bytes(integer: ciborium::value::Integer) -> Option<Vec<u8>> {
+    let value = u64::try_from(integer).ok()?;
+    if value == 0 {
+        return Some(vec![0]);
+    }
+    let bytes = value.to_be_bytes();
+    let first_nonzero = bytes.iter().position(|byte| *byte != 0)?;
+    Some(bytes[first_nonzero..].to_vec())
+}
+
+fn bytes_to_usize(bytes: &[u8]) -> Option<usize> {
+    if bytes.len() > size_of::<usize>() {
+        return None;
+    }
+    let mut value = 0usize;
+    for byte in bytes {
+        value = (value << 8) | usize::from(*byte);
+    }
+    Some(value)
+}
+
+fn sid_identifier(
+    sid_registry: &SidRegistry,
+    rule_index: usize,
+    entry_index: usize,
+    kind: &str,
+    sid: u64,
+) -> Result<String> {
+    sid_registry
+        .identifier(sid)
+        .map(str::to_owned)
+        .map_err(|_| invalid_field(rule_index, entry_index, format!("unknown {kind} SID {sid}")))
+}
+
+fn required_field_value(
+    value: &Value,
+    key: i128,
+    rule_index: usize,
+    entry_index: usize,
+) -> Result<&Value> {
+    required_map_value(value, key).map_err(|reason| {
+        invalid_field(
+            rule_index,
+            entry_index,
+            format!("missing or invalid key {key}: {reason}"),
+        )
+    })
+}
+
+fn require_optional_field_value(
+    value: &Value,
+    key: i128,
+    rule_index: usize,
+    entry_index: usize,
+) -> Result<()> {
+    if map_value(value, key).is_none() {
+        return Ok(());
+    }
+    required_field_value(value, key, rule_index, entry_index).map(|_| ())
+}
+
+fn required_field_usize(
+    value: &Value,
+    key: i128,
+    rule_index: usize,
+    entry_index: usize,
+) -> Result<usize> {
+    value_to_usize(required_field_value(value, key, rule_index, entry_index)?).map_err(|reason| {
+        invalid_field(
+            rule_index,
+            entry_index,
+            format!("key {key} must be a usize integer: {reason}"),
+        )
+    })
+}
+
+fn required_field_u16(
+    value: &Value,
+    key: i128,
+    rule_index: usize,
+    entry_index: usize,
+) -> Result<u16> {
+    value_to_u16(required_field_value(value, key, rule_index, entry_index)?).map_err(|reason| {
+        invalid_field(
+            rule_index,
+            entry_index,
+            format!("key {key} must be a u16 integer: {reason}"),
+        )
+    })
+}
+
+fn required_field_u64(
+    value: &Value,
+    key: i128,
+    rule_index: usize,
+    entry_index: usize,
+) -> Result<u64> {
+    value_to_u64(required_field_value(value, key, rule_index, entry_index)?).map_err(|reason| {
+        invalid_field(
+            rule_index,
+            entry_index,
+            format!("key {key} must be a u64 integer: {reason}"),
+        )
+    })
+}
+
+fn required_array(value: &Value, key: i128) -> core::result::Result<&[Value], String> {
+    let value = required_map_value(value, key)?;
+    let Value::Array(values) = value else {
+        return Err("value is not an array".to_owned());
+    };
+    Ok(values)
+}
+
+fn required_usize(value: &Value, key: i128) -> core::result::Result<usize, String> {
+    value_to_usize(required_map_value(value, key)?)
+}
+
+fn required_u64(value: &Value, key: i128) -> core::result::Result<u64, String> {
+    value_to_u64(required_map_value(value, key)?)
+}
+
+fn required_map_value(value: &Value, key: i128) -> core::result::Result<&Value, String> {
+    map_value(value, key).ok_or_else(|| format!("missing map key {key}"))
+}
+
+fn map_value(value: &Value, key: i128) -> Option<&Value> {
+    let Value::Map(entries) = value else {
+        return None;
+    };
+    entries
+        .iter()
+        .find_map(|(candidate, value)| (integer_key(candidate) == Some(key)).then_some(value))
+}
+
+fn integer_key(value: &Value) -> Option<i128> {
+    let Value::Integer(integer) = value else {
+        return None;
+    };
+    Some(i128::from(*integer))
+}
+
+fn value_to_usize(value: &Value) -> core::result::Result<usize, String> {
+    let Value::Integer(integer) = value else {
+        return Err("value is not an integer".to_owned());
+    };
+    usize::try_from(*integer).map_err(|error| error.to_string())
+}
+
+fn value_to_u16(value: &Value) -> core::result::Result<u16, String> {
+    let Value::Integer(integer) = value else {
+        return Err("value is not an integer".to_owned());
+    };
+    u16::try_from(*integer).map_err(|error| error.to_string())
+}
+
+fn value_to_u64(value: &Value) -> core::result::Result<u64, String> {
+    let Value::Integer(integer) = value else {
+        return Err("value is not an integer".to_owned());
+    };
+    u64::try_from(*integer).map_err(|error| error.to_string())
 }
 
 fn direction_selector(
