@@ -238,6 +238,69 @@ fn cbor_rules_preserve_field_length_function_sids() {
     assert_eq!(field.length, FieldLength::FunctionSid(9999));
 }
 
+#[test]
+fn cbor_rules_resolve_known_field_length_function_sids() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = map(vec![(
+        int(2574),
+        map(vec![(
+            int(23),
+            array(vec![map(vec![
+                (int(1), int(4)),
+                (int(2), int(3)),
+                (
+                    int(23),
+                    array(vec![
+                        normal_field_with_length(
+                            0,
+                            1205,
+                            tagged(45, int(5002)),
+                            4000,
+                            bytes(&[]),
+                            2001,
+                            3001,
+                        ),
+                        normal_field_with_length(
+                            1,
+                            1208,
+                            tagged(45, int(5004)),
+                            4000,
+                            bytes(&[]),
+                            2001,
+                            3001,
+                        ),
+                        normal_field_with_length_value(
+                            2,
+                            1207,
+                            tagged(45, int(5001)),
+                            int(0),
+                            4000,
+                            bytes(&[]),
+                            2001,
+                            3001,
+                        ),
+                    ]),
+                ),
+            ])]),
+        )]),
+    )]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let context = RuleContext::from_cbor_slice(&cbor, registry).unwrap();
+    let fields = context.rules().rules()[0].fields();
+
+    assert_eq!(fields[0].length, FieldLength::TokenLength);
+    assert_eq!(fields[1].length, FieldLength::VariableBits);
+    assert_eq!(
+        fields[2].length,
+        FieldLength::FromPreviousField {
+            entry_index: 0,
+            unit: LengthUnit::Bytes,
+        }
+    );
+}
+
 fn normal_field_with_length(
     entry_index: i128,
     field_sid: i128,
@@ -251,6 +314,29 @@ fn normal_field_with_length(
         (int(1), int(entry_index)),
         (int(3), int(field_sid)),
         (int(4), length),
+        (int(6), int(direction_sid)),
+        (int(7), int(1)),
+        (int(8), target_list(vec![target])),
+        (int(11), int(matching_sid)),
+        (int(15), int(cda_sid)),
+    ])
+}
+
+fn normal_field_with_length_value(
+    entry_index: i128,
+    field_sid: i128,
+    length: ciborium::value::Value,
+    length_value: ciborium::value::Value,
+    direction_sid: i128,
+    target: ciborium::value::Value,
+    matching_sid: i128,
+    cda_sid: i128,
+) -> ciborium::value::Value {
+    map(vec![
+        (int(1), int(entry_index)),
+        (int(3), int(field_sid)),
+        (int(4), length),
+        (int(5), length_value),
         (int(6), int(direction_sid)),
         (int(7), int(1)),
         (int(8), target_list(vec![target])),
