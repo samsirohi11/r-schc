@@ -279,20 +279,20 @@ fn target_as_value(target: &TargetValue, bit_len: usize) -> Result<Option<FieldV
 }
 
 fn bytes_as_value(bytes: &[u8], bit_len: usize) -> Result<FieldValue> {
-    if bit_len <= 64 {
-        let mut value = 0_u64;
-        for byte in bytes {
-            value = (value << 8) | u64::from(*byte);
-        }
-        return FieldValue::from_u64(value, bit_len);
-    }
-
     let byte_len = bit_len.div_ceil(8);
     if bytes.len() > byte_len {
         return Err(SchcError::InvalidResidue(format!(
             "target value has {} bytes but field is {bit_len} bits",
             bytes.len()
         )));
+    }
+
+    if bit_len <= 64 {
+        let mut value = 0_u64;
+        for byte in bytes {
+            value = (value << 8) | u64::from(*byte);
+        }
+        return FieldValue::from_u64(value, bit_len);
     }
 
     let mut padded = vec![0; byte_len];
@@ -482,6 +482,18 @@ mod tests {
         );
 
         assert!(matches_branch(&field, &branch).unwrap().is_some());
+    }
+
+    #[test]
+    fn equal_rejects_target_bytes_longer_than_field() {
+        let field = FieldValue::from_u64(0x01, 8).unwrap();
+        let branch = branch(
+            MatchingOperator::Equal,
+            TargetValue::Bytes(vec![0x00, 0x01]),
+            Cda::NotSent,
+        );
+
+        assert!(matches_branch(&field, &branch).is_err());
     }
 
     #[test]
