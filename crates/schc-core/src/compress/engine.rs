@@ -170,8 +170,7 @@ fn matches_branch(field: &FieldValue, branch: &Branch) -> Result<Option<MatchRes
             let Some(target) = target_as_value(&branch.target, field.bit_len())? else {
                 return Ok(None);
             };
-            let shift = field.bit_len() - bits;
-            ((field.to_u64()? >> shift) == (target.to_u64()? >> shift)).then_some(MatchResult {
+            prefix_bits_equal(field, &target, bits).then_some(MatchResult {
                 mapping_index: None,
                 msb_bits: Some(bits),
             })
@@ -233,12 +232,7 @@ fn write_residue(
             if lsb_bits == 0 {
                 return Ok(());
             }
-            let mask = if lsb_bits == 64 {
-                u64::MAX
-            } else {
-                (1_u64 << lsb_bits) - 1
-            };
-            writer.write_bits(field.to_u64()? & mask, lsb_bits)
+            writer.write_bits(low_bits_u64(field, lsb_bits)?, lsb_bits)
         }
     }
 }
@@ -276,6 +270,37 @@ fn target_as_value(target: &TargetValue, bit_len: usize) -> Result<Option<FieldV
         TargetValue::Bytes(bytes) => bytes_as_value(bytes, bit_len).map(Some),
         _ => Ok(None),
     }
+}
+
+fn field_bit(value: &FieldValue, index: usize) -> bool {
+    let byte = value.bytes()[index / 8];
+    let shift = 7 - (index % 8);
+    ((byte >> shift) & 1) == 1
+}
+
+fn prefix_bits_equal(left: &FieldValue, right: &FieldValue, bit_len: usize) -> bool {
+    left.bit_len() == right.bit_len()
+        && (0..bit_len).all(|index| field_bit(left, index) == field_bit(right, index))
+}
+
+fn low_bits_u64(value: &FieldValue, bit_len: usize) -> Result<u64> {
+    if bit_len > 64 {
+        return Err(SchcError::InvalidResidue(
+            "lsb for suffixes wider than 64 bits is not supported".to_owned(),
+        ));
+    }
+    if bit_len > value.bit_len() {
+        return Err(SchcError::InvalidBitLength {
+            operation: "lsb",
+            bits: bit_len,
+        });
+    }
+
+    let mut output = 0_u64;
+    for index in (value.bit_len() - bit_len)..value.bit_len() {
+        output = (output << 1) | u64::from(field_bit(value, index));
+    }
+    Ok(output)
 }
 
 fn bytes_as_value(bytes: &[u8], bit_len: usize) -> Result<FieldValue> {
@@ -548,6 +573,17 @@ mod tests {
     }
 
     #[test]
+    fn value_sent_can_carry_more_than_u64_bits() {
+        let value = FieldValue::from_bytes(b"temperature=21.5".to_vec(), 128).unwrap();
+        let mut writer = BitWriter::new();
+
+        value.write_to(&mut writer).unwrap();
+
+        assert_eq!(writer.bit_len(), 128);
+        assert_eq!(writer.to_vec(), b"temperature=21.5");
+    }
+
+    #[test]
     fn lsb_writes_only_low_bits_after_msb_match() {
         let field = FieldValue::from_u64(0b1010_1111, 8).unwrap();
         let branch = branch(
@@ -562,5 +598,23 @@ mod tests {
 
         assert_eq!(writer.bit_len(), 4);
         assert_eq!(writer.to_vec(), vec![0b1111_0000]);
+    }
+
+    #[test]
+    fn lsb_writes_low_bits_for_values_wider_than_u64() {
+        let field =
+            FieldValue::from_bytes(vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0x99], 72).unwrap();
+        let branch = branch(
+            MatchingOperator::Msb(64),
+            TargetValue::Bytes(vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0]),
+            Cda::Lsb,
+        );
+        let result = matches_branch(&field, &branch).unwrap().unwrap();
+        let mut writer = BitWriter::new();
+
+        write_residue(&mut writer, &field, &branch, &result).unwrap();
+
+        assert_eq!(writer.bit_len(), 8);
+        assert_eq!(writer.to_vec(), vec![0x99]);
     }
 }

@@ -1,6 +1,6 @@
 //! Rule-driven SCHC decompression engine.
 
-use crate::bit::BitReader;
+use crate::bit::{BitReader, BitWriter};
 use crate::error::{Result, SchcError};
 use crate::packet::field::FieldValue;
 use crate::rule::{
@@ -212,14 +212,13 @@ fn decode_lsb(field: &FieldRule, bit_len: usize, reader: &mut BitReader<'_>) -> 
         ));
     };
     let lsb_bits = bit_len - msb_bits;
+    if lsb_bits > 64 {
+        return Err(SchcError::InvalidResidue(
+            "lsb suffix wider than 64 bits is not supported".to_owned(),
+        ));
+    }
     let lsb = read_optional_bits(reader, lsb_bits)?;
-    let value = if lsb_bits == 64 {
-        lsb
-    } else {
-        let msb_value = (target.to_u64()? >> lsb_bits) << lsb_bits;
-        msb_value | lsb
-    };
-    FieldValue::from_u64(value, bit_len)
+    combine_lsb(&target, bit_len, msb_bits, lsb, lsb_bits)
 }
 
 fn read_optional_bits(reader: &mut BitReader<'_>, bit_len: usize) -> Result<u64> {
@@ -228,6 +227,24 @@ fn read_optional_bits(reader: &mut BitReader<'_>, bit_len: usize) -> Result<u64>
     } else {
         reader.read_bits(bit_len)
     }
+}
+
+fn combine_lsb(
+    target: &FieldValue,
+    bit_len: usize,
+    msb_bits: usize,
+    lsb: u64,
+    lsb_bits: usize,
+) -> Result<FieldValue> {
+    let mut writer = BitWriter::new();
+    let mut target_reader = BitReader::new(target.bytes());
+    for _ in 0..msb_bits {
+        writer.write_bits(target_reader.read_bits(1)?, 1)?;
+    }
+    if lsb_bits > 0 {
+        writer.write_bits(lsb, lsb_bits)?;
+    }
+    FieldValue::from_bytes(writer.to_vec(), bit_len)
 }
 
 fn target_as_value(target: &TargetValue, bit_len: usize) -> Result<Option<FieldValue>> {
@@ -488,8 +505,13 @@ fn missing_field(field: &FieldRef) -> SchcError {
 
 #[cfg(test)]
 mod tests {
-    use super::{select_rule, transport_checksum};
-    use crate::{Rule, RuleId, RuleSet, SidRegistry};
+    use super::{decode_lsb, select_rule, transport_checksum};
+    use crate::bit::BitReader;
+    use crate::rule::FieldRule;
+    use crate::{
+        Cda, DirectionSelector, FieldLength, FieldRef, MatchingOperator, Rule, RuleId, RuleSet,
+        SidRegistry, TargetValue,
+    };
 
     #[test]
     fn rule_selection_tries_loaded_rules_in_order() {
@@ -501,6 +523,26 @@ mod tests {
 
         assert_eq!(rule.id().value(), 0b10);
         assert_eq!(reader.position(), 2);
+    }
+
+    #[test]
+    fn lsb_reconstructs_values_wider_than_u64() {
+        let field = FieldRule {
+            field: FieldRef::Ipv6("fid-ipv6-devprefix"),
+            length: FieldLength::FixedBits(72),
+            field_position: 1,
+            direction: DirectionSelector::Bidirectional,
+            target: TargetValue::Bytes(vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0]),
+            matching: MatchingOperator::Msb(64),
+            action: Cda::Lsb,
+            entry_index: 0,
+        };
+        let mut reader = BitReader::new(&[0x99]);
+
+        let value = decode_lsb(&field, 72, &mut reader).unwrap();
+
+        assert_eq!(value.bytes(), &[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0x99]);
+        assert_eq!(value.bit_len(), 72);
     }
 
     #[test]
