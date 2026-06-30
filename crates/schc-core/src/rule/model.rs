@@ -109,6 +109,8 @@ pub enum FieldLength {
     FixedBits(usize),
     /// A variable number of bytes.
     VariableBytes,
+    /// A variable number of bits.
+    VariableBits,
     /// Length is taken from the CoAP token length field.
     TokenLength,
     /// Length is derived from a previous field entry.
@@ -168,6 +170,8 @@ pub struct FieldRule {
     pub field: FieldRef,
     /// Field length rule.
     pub length: FieldLength,
+    /// Field position for repeated field identifiers.
+    pub field_position: usize,
     /// Direction selector for this entry.
     pub direction: DirectionSelector,
     /// Target value used by the matching operator.

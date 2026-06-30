@@ -22,6 +22,7 @@ impl DecisionTree {
 #[derive(Debug)]
 struct BranchGroup<'rule> {
     parse: ParseStep,
+    field_position: usize,
     direction: DirectionSelector,
     target: TargetValue,
     matching: MatchingOperator,
@@ -87,6 +88,7 @@ fn branch_groups<'rule>(
         if let Some(group) = groups.iter_mut().find(|group| {
             group.parse.field == field_rule.field
                 && group.parse.length == field_rule.length
+                && group.field_position == field_rule.field_position
                 && group.direction == field_rule.direction
                 && group.target == field_rule.target
                 && group.matching == field_rule.matching
@@ -103,6 +105,7 @@ fn branch_groups<'rule>(
                 length: field_rule.length.clone(),
                 entry_index: field_rule.entry_index,
             },
+            field_position: field_rule.field_position,
             direction: field_rule.direction,
             target: field_rule.target.clone(),
             matching: field_rule.matching,
@@ -119,6 +122,7 @@ fn branch_groups<'rule>(
 fn branch_sort_key(field_rule: &FieldRule, next_field: Option<&FieldRef>) -> Vec<u8> {
     let mut key = Vec::new();
     push_field_ref(&mut key, &field_rule.field);
+    key.extend_from_slice(&field_rule.field_position.to_be_bytes());
     push_field_length(&mut key, &field_rule.length);
     push_direction(&mut key, field_rule.direction);
     push_target(&mut key, &field_rule.target);
@@ -153,9 +157,10 @@ fn push_field_length(output: &mut Vec<u8>, length: &FieldLength) {
             output.extend_from_slice(&bits.to_be_bytes());
         }
         FieldLength::VariableBytes => output.push(1),
-        FieldLength::TokenLength => output.push(2),
+        FieldLength::VariableBits => output.push(2),
+        FieldLength::TokenLength => output.push(3),
         FieldLength::FromPreviousField { entry_index, unit } => {
-            output.push(3);
+            output.push(4);
             output.extend_from_slice(&entry_index.to_be_bytes());
             output.push(match unit {
                 LengthUnit::Bytes => 0,
@@ -163,7 +168,7 @@ fn push_field_length(output: &mut Vec<u8>, length: &FieldLength) {
             });
         }
         FieldLength::FunctionSid(sid) => {
-            output.push(4);
+            output.push(5);
             output.extend_from_slice(&sid.to_be_bytes());
         }
     }

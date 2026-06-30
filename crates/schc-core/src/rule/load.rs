@@ -7,8 +7,8 @@ use serde::Deserialize;
 
 use crate::error::{Result, SchcError};
 use crate::rule::model::{
-    Cda, DirectionSelector, FieldLength, FieldRef, FieldRule, MatchingOperator, Rule, RuleId,
-    RuleSet, TargetValue,
+    Cda, DirectionSelector, FieldLength, FieldRef, FieldRule, LengthUnit, MatchingOperator, Rule,
+    RuleId, RuleSet, TargetValue,
 };
 use crate::SidRegistry;
 
@@ -33,11 +33,46 @@ struct JsonRule {
 #[derive(Debug, Deserialize)]
 struct JsonField {
     field: String,
-    length_bits: usize,
+    #[serde(default)]
+    length_bits: Option<usize>,
+    #[serde(default)]
+    length: Option<JsonLength>,
+    #[serde(default = "default_field_position")]
+    field_position: usize,
     direction: String,
     target: serde_json::Value,
     mo: String,
     cda: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+enum JsonLength {
+    Fixed {
+        bits: usize,
+    },
+    TokenLength,
+    FromPrevious {
+        entry_index: usize,
+        unit: JsonLengthUnit,
+    },
+    Variable {
+        unit: JsonLengthUnit,
+    },
+    FunctionSid {
+        sid: u64,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum JsonLengthUnit {
+    Bytes,
+    Bits,
+}
+
+fn default_field_position() -> usize {
+    1
 }
 
 impl RuleContext {
@@ -184,7 +219,8 @@ fn load_field(
 
     Ok(FieldRule {
         field: field_ref(&json_field.field, field_sid),
-        length: FieldLength::FixedBits(json_field.length_bits),
+        length: json_field_length(rule_index, entry_index, &json_field)?,
+        field_position: json_field.field_position,
         direction: direction_selector(
             sid_registry,
             rule_index,
@@ -196,6 +232,54 @@ fn load_field(
         action: cda(sid_registry, rule_index, entry_index, &json_field.cda)?,
         entry_index,
     })
+}
+
+fn json_field_length(
+    rule_index: usize,
+    entry_index: usize,
+    field: &JsonField,
+) -> Result<FieldLength> {
+    match (&field.length, field.length_bits) {
+        (Some(JsonLength::Fixed { bits }), None) => Ok(FieldLength::FixedBits(*bits)),
+        (Some(JsonLength::TokenLength), None) => Ok(FieldLength::TokenLength),
+        (Some(JsonLength::FromPrevious { entry_index, unit }), None) => {
+            Ok(FieldLength::FromPreviousField {
+                entry_index: *entry_index,
+                unit: json_length_unit(unit),
+            })
+        }
+        (
+            Some(JsonLength::Variable {
+                unit: JsonLengthUnit::Bytes,
+            }),
+            None,
+        ) => Ok(FieldLength::VariableBytes),
+        (
+            Some(JsonLength::Variable {
+                unit: JsonLengthUnit::Bits,
+            }),
+            None,
+        ) => Ok(FieldLength::VariableBits),
+        (Some(JsonLength::FunctionSid { sid }), None) => Ok(FieldLength::FunctionSid(*sid)),
+        (None, Some(bits)) => Ok(FieldLength::FixedBits(bits)),
+        (Some(_), Some(_)) => Err(invalid_field(
+            rule_index,
+            entry_index,
+            "field must use either length or length_bits, not both".to_owned(),
+        )),
+        (None, None) => Err(invalid_field(
+            rule_index,
+            entry_index,
+            "field length is missing".to_owned(),
+        )),
+    }
+}
+
+fn json_length_unit(unit: &JsonLengthUnit) -> LengthUnit {
+    match unit {
+        JsonLengthUnit::Bytes => LengthUnit::Bytes,
+        JsonLengthUnit::Bits => LengthUnit::Bits,
+    }
 }
 
 fn load_cbor_field(
@@ -221,14 +305,21 @@ fn load_cbor_normal_field(
     let field_sid = required_field_u64(value, 3, rule_index, entry_order)?;
     let field_identifier =
         sid_identifier(sid_registry, rule_index, entry_order, "field", field_sid)?;
-    let length = cbor_field_length(value, 4, rule_index, entry_order)?;
+    let length = cbor_field_length(
+        sid_registry,
+        value,
+        4,
+        map_value(value, 5),
+        rule_index,
+        entry_order,
+    )?;
     let direction = cbor_direction_selector(
         sid_registry,
         rule_index,
         entry_order,
         required_field_u64(value, 6, rule_index, entry_order)?,
     )?;
-    require_optional_field_value(value, 7, rule_index, entry_order)?;
+    let field_position = required_field_usize(value, 7, rule_index, entry_order)?;
     let target = cbor_target_value(
         required_field_value(value, 8, rule_index, entry_order)?,
         rule_index,
@@ -251,6 +342,7 @@ fn load_cbor_normal_field(
     Ok(FieldRule {
         field: field_ref(&field_identifier, field_sid),
         length,
+        field_position,
         direction,
         target,
         matching,
@@ -267,14 +359,21 @@ fn load_cbor_universal_option_field(
 ) -> Result<FieldRule> {
     let entry_index = required_field_usize(value, -1, rule_index, entry_order)?;
     let option_number = required_field_u16(value, -5, rule_index, entry_order)?;
-    let length = cbor_field_length(value, -11, rule_index, entry_order)?;
+    let length = cbor_field_length(
+        sid_registry,
+        value,
+        -11,
+        map_value(value, -6),
+        rule_index,
+        entry_order,
+    )?;
     let direction = cbor_direction_selector(
         sid_registry,
         rule_index,
         entry_order,
         required_field_u64(value, -12, rule_index, entry_order)?,
     )?;
-    require_optional_field_value(value, -10, rule_index, entry_order)?;
+    let field_position = required_field_usize(value, -10, rule_index, entry_order)?;
     let target = cbor_target_value(
         required_field_value(value, -3, rule_index, entry_order)?,
         rule_index,
@@ -299,6 +398,7 @@ fn load_cbor_universal_option_field(
             number: option_number,
         },
         length,
+        field_position,
         direction,
         target,
         matching,
@@ -308,8 +408,10 @@ fn load_cbor_universal_option_field(
 }
 
 fn cbor_field_length(
+    sid_registry: &SidRegistry,
     value: &Value,
     key: i128,
+    function_value: Option<&Value>,
     rule_index: usize,
     entry_index: usize,
 ) -> Result<FieldLength> {
@@ -333,12 +435,73 @@ fn cbor_field_length(
                     format!("unsupported field-length function tag 45: {reason}"),
                 )
             })?;
-            Ok(FieldLength::FunctionSid(sid))
+            field_length_function(sid_registry, rule_index, entry_index, sid, function_value)
         }
         _ => Err(invalid_field(
             rule_index,
             entry_index,
             format!("field length key {key} must be an integer"),
+        )),
+    }
+}
+
+fn field_length_function(
+    sid_registry: &SidRegistry,
+    rule_index: usize,
+    entry_index: usize,
+    sid: u64,
+    value: Option<&Value>,
+) -> Result<FieldLength> {
+    let Ok(identifier) = sid_registry.identifier(sid) else {
+        return Ok(FieldLength::FunctionSid(sid));
+    };
+    match identifier {
+        "fl-token-length" => Ok(FieldLength::TokenLength),
+        "fl-variable" => Ok(FieldLength::VariableBytes),
+        "fl-variable-bits" => Ok(FieldLength::VariableBits),
+        "fl-length-bytes" => Ok(FieldLength::FromPreviousField {
+            entry_index: field_length_parameter(value, rule_index, entry_index)?,
+            unit: LengthUnit::Bytes,
+        }),
+        "fl-length-bits" => Ok(FieldLength::FromPreviousField {
+            entry_index: field_length_parameter(value, rule_index, entry_index)?,
+            unit: LengthUnit::Bits,
+        }),
+        _ => Ok(FieldLength::FunctionSid(sid)),
+    }
+}
+
+fn field_length_parameter(
+    value: Option<&Value>,
+    rule_index: usize,
+    entry_index: usize,
+) -> Result<usize> {
+    let value = value.ok_or_else(|| {
+        invalid_field(
+            rule_index,
+            entry_index,
+            "field-length function requires field-length-value".to_owned(),
+        )
+    })?;
+    match value {
+        Value::Integer(_) => value_to_usize(value).map_err(|reason| {
+            invalid_field(
+                rule_index,
+                entry_index,
+                format!("field-length-value must be a usize integer: {reason}"),
+            )
+        }),
+        Value::Bytes(bytes) => bytes_to_usize(bytes).ok_or_else(|| {
+            invalid_field(
+                rule_index,
+                entry_index,
+                "field-length-value bytes do not fit usize".to_owned(),
+            )
+        }),
+        _ => Err(invalid_field(
+            rule_index,
+            entry_index,
+            "field-length-value must be an integer or byte string".to_owned(),
         )),
     }
 }
@@ -534,18 +697,6 @@ fn required_field_value(
             format!("missing or invalid key {key}: {reason}"),
         )
     })
-}
-
-fn require_optional_field_value(
-    value: &Value,
-    key: i128,
-    rule_index: usize,
-    entry_index: usize,
-) -> Result<()> {
-    if map_value(value, key).is_none() {
-        return Ok(());
-    }
-    required_field_value(value, key, rule_index, entry_index).map(|_| ())
 }
 
 fn required_field_usize(

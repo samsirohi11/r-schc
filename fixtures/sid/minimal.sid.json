@@ -16,12 +16,21 @@
       { "namespace": "identity", "identifier": "fid-udp-app-port", "sid": 1101 },
       { "namespace": "identity", "identifier": "fid-udp-length", "sid": 1102 },
       { "namespace": "identity", "identifier": "fid-udp-checksum", "sid": 1103 },
+      { "namespace": "identity", "identifier": "fid-udp-payload", "sid": 1104 },
       { "namespace": "identity", "identifier": "fid-coap-version", "sid": 1200 },
       { "namespace": "identity", "identifier": "fid-coap-type", "sid": 1201 },
       { "namespace": "identity", "identifier": "fid-coap-tkl", "sid": 1202 },
       { "namespace": "identity", "identifier": "fid-coap-code", "sid": 1203 },
       { "namespace": "identity", "identifier": "fid-coap-mid", "sid": 1204 },
       { "namespace": "identity", "identifier": "fid-coap-token", "sid": 1205 },
+      { "namespace": "identity", "identifier": "fid-coap-option-uri-host", "sid": 1206 },
+      { "namespace": "identity", "identifier": "fid-coap-option-uri-path", "sid": 1207 },
+      { "namespace": "identity", "identifier": "fid-coap-payload", "sid": 1208 },
+      { "namespace": "identity", "identifier": "fid-coap-payload-marker", "sid": 1209 },
+      { "namespace": "identity", "identifier": "fid-icmpv6-type", "sid": 1300 },
+      { "namespace": "identity", "identifier": "fid-icmpv6-code", "sid": 1301 },
+      { "namespace": "identity", "identifier": "fid-icmpv6-checksum", "sid": 1302 },
+      { "namespace": "identity", "identifier": "fid-icmpv6-payload", "sid": 1303 },
       { "namespace": "identity", "identifier": "mo-equal", "sid": 2000 },
       { "namespace": "identity", "identifier": "mo-ignore", "sid": 2001 },
       { "namespace": "identity", "identifier": "mo-msb", "sid": 2002 },
@@ -33,7 +42,12 @@
       { "namespace": "identity", "identifier": "cda-compute", "sid": 3004 },
       { "namespace": "identity", "identifier": "di-bidirectional", "sid": 4000 },
       { "namespace": "identity", "identifier": "di-up", "sid": 4001 },
-      { "namespace": "identity", "identifier": "di-down", "sid": 4002 }
+      { "namespace": "identity", "identifier": "di-down", "sid": 4002 },
+      { "namespace": "identity", "identifier": "fl-length-bits", "sid": 5000 },
+      { "namespace": "identity", "identifier": "fl-length-bytes", "sid": 5001 },
+      { "namespace": "identity", "identifier": "fl-token-length", "sid": 5002 },
+      { "namespace": "identity", "identifier": "fl-variable", "sid": 5003 },
+      { "namespace": "identity", "identifier": "fl-variable-bits", "sid": 5004 }
     ]
   }
 }

@@ -140,6 +140,7 @@ fn fixed_field_len(length: &FieldLength) -> Result<usize> {
     match length {
         FieldLength::FixedBits(bits) => Ok(*bits),
         FieldLength::VariableBytes
+        | FieldLength::VariableBits
         | FieldLength::TokenLength
         | FieldLength::FromPreviousField { .. }
         | FieldLength::FunctionSid(_) => Err(SchcError::InvalidResidue(

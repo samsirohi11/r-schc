@@ -1,3 +1,4 @@
+use schc_core::rule::LengthUnit;
 use schc_core::tree::DecisionTree;
 use schc_core::{
     Cda, DirectionSelector, FieldLength, FieldRef, MatchingOperator, RuleContext, SchcError,
@@ -51,6 +52,41 @@ fn json_rules_load_into_typed_context() {
     assert_eq!(context.rules().rules()[0].id().value(), 3);
     assert_eq!(context.rules().rules()[0].id().bit_len(), 4);
     assert_eq!(context.rules().rules()[0].fields().len(), 19);
+}
+
+#[test]
+fn json_rules_load_dynamic_field_lengths_and_positions() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 9,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-coap-tkl", "length": { "type": "fixed", "bits": 4 }, "field_position": 1, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
+          { "field": "fid-coap-token", "length": { "type": "token-length" }, "field_position": 1, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
+          { "field": "fid-coap-payload", "length": { "type": "variable", "unit": "bytes" }, "field_position": 1, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
+          { "field": "fid-coap-option-uri-path", "length": { "type": "from-previous", "entry_index": 2, "unit": "bytes" }, "field_position": 2, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
+        ]
+      }]
+    }
+    "#;
+
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+    let fields = context.rules().rules()[0].fields();
+
+    assert_eq!(fields[0].length, FieldLength::FixedBits(4));
+    assert_eq!(fields[0].field_position, 1);
+    assert_eq!(fields[1].length, FieldLength::TokenLength);
+    assert_eq!(fields[2].length, FieldLength::VariableBytes);
+    assert_eq!(
+        fields[3].length,
+        FieldLength::FromPreviousField {
+            entry_index: 2,
+            unit: LengthUnit::Bytes,
+        }
+    );
+    assert_eq!(fields[3].field_position, 2);
 }
 
 #[test]
