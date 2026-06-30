@@ -1,0 +1,55 @@
+use schc_core::{Compressor, Direction, RuleContext, SchcError, SidRegistry};
+
+fn sid_fixture() -> &'static str {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/sid/minimal.sid.json"
+    )
+}
+
+fn rule_fixture() -> &'static str {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/rules/udp_coap.json"
+    )
+}
+
+fn compressor() -> Compressor {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = std::fs::read_to_string(rule_fixture()).unwrap();
+    let context = RuleContext::from_json_str(&json, registry).unwrap();
+
+    Compressor::new(context).unwrap()
+}
+
+fn coap_get_packet() -> Vec<u8> {
+    hex::decode(
+        "60000000000c114020010db8000000000000000000000001\
+         20010db800000000000000000000000216331633000c0000\
+         4001002a",
+    )
+    .unwrap()
+}
+
+#[test]
+fn compressor_emits_rule_id_for_matching_packet() {
+    let compressor = compressor();
+    let packet = coap_get_packet();
+
+    let compressed = compressor.compress(Direction::Up, &packet).unwrap();
+
+    assert_eq!(compressed[0] >> 4, 0b0011);
+    assert_eq!(compressed.bit_len(), 34);
+    assert_eq!(compressed.bytes(), &[0x34, 0x00, 0x00, 0x0a, 0x80]);
+}
+
+#[test]
+fn compressor_reports_no_matching_rule_for_equal_mismatch() {
+    let compressor = compressor();
+    let mut packet = coap_get_packet();
+    packet[6] = 0x3a;
+
+    let error = compressor.compress(Direction::Up, &packet).unwrap_err();
+
+    assert!(matches!(error, SchcError::NoMatchingRule));
+}

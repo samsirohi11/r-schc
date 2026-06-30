@@ -1,7 +1,5 @@
-//! SCHC compression entry points.
+//! SCHC compression.
 
-/// Public compressor handle reserved for the compression module implementation.
-#[derive(Debug)]
-pub struct Compressor {
-    _private: (),
-}
+mod engine;
+
+pub use engine::{CompressedDatagram, Compressor};
