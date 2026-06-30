@@ -2,7 +2,7 @@
 
 use crate::bit::{BitReader, BitWriter};
 use crate::error::{Result, SchcError};
-use crate::packet::{Ipv6Packet, UdpDatagram};
+use crate::packet::{field::FieldValue, Ipv6Packet, UdpDatagram};
 use crate::rule::{Cda, Direction, FieldRef, MatchingOperator, RuleContext};
 use crate::tree::{Branch, DecisionTree, ParseStep};
 use crate::TargetValue;
@@ -143,30 +143,6 @@ struct Candidate {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-struct FieldValue {
-    value: u64,
-    bit_len: usize,
-}
-
-impl FieldValue {
-    fn new(value: u64, bit_len: usize) -> Result<Self> {
-        if bit_len > 64 {
-            return Err(SchcError::InvalidBitLength {
-                operation: "field_value",
-                bits: bit_len,
-            });
-        }
-        if bit_len < 64 && value >= (1_u64 << bit_len) {
-            return Err(SchcError::InvalidBitLength {
-                operation: "field_value_fit",
-                bits: bit_len,
-            });
-        }
-        Ok(Self { value, bit_len })
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
 struct MatchResult {
     mapping_index: Option<usize>,
     msb_bits: Option<usize>,
@@ -174,8 +150,8 @@ struct MatchResult {
 
 fn matches_branch(field: &FieldValue, branch: &Branch) -> Result<Option<MatchResult>> {
     let result = match branch.matching {
-        MatchingOperator::Equal => target_as_value(&branch.target, field.bit_len)?
-            .filter(|target| *target == field.value)
+        MatchingOperator::Equal => target_as_value(&branch.target, field.bit_len())?
+            .filter(|target| target == field)
             .map(|_| MatchResult {
                 mapping_index: None,
                 msb_bits: None,
@@ -185,17 +161,17 @@ fn matches_branch(field: &FieldValue, branch: &Branch) -> Result<Option<MatchRes
             msb_bits: None,
         }),
         MatchingOperator::Msb(bits) => {
-            if bits > field.bit_len {
+            if bits > field.bit_len() {
                 return Err(SchcError::InvalidBitLength {
                     operation: "msb",
                     bits,
                 });
             }
-            let Some(target) = target_as_value(&branch.target, field.bit_len)? else {
+            let Some(target) = target_as_value(&branch.target, field.bit_len())? else {
                 return Ok(None);
             };
-            let shift = field.bit_len - bits;
-            ((field.value >> shift) == (target >> shift)).then_some(MatchResult {
+            let shift = field.bit_len() - bits;
+            ((field.to_u64()? >> shift) == (target.to_u64()? >> shift)).then_some(MatchResult {
                 mapping_index: None,
                 msb_bits: Some(bits),
             })
@@ -204,7 +180,7 @@ fn matches_branch(field: &FieldValue, branch: &Branch) -> Result<Option<MatchRes
             TargetValue::Mapping(values) => {
                 let mut match_result = None;
                 for (index, value) in values.iter().enumerate() {
-                    if bytes_as_value(value, field.bit_len)? == field.value {
+                    if bytes_as_value(value, field.bit_len())? == *field {
                         match_result = Some(MatchResult {
                             mapping_index: Some(index),
                             msb_bits: None,
@@ -230,10 +206,10 @@ fn write_residue(
     match branch.action {
         Cda::NotSent | Cda::Compute => Ok(()),
         Cda::ValueSent => {
-            if field.bit_len == 0 {
+            if field.bit_len() == 0 {
                 return Ok(());
             }
-            writer.write_bits(field.value, field.bit_len)
+            field.write_to(writer)
         }
         Cda::MappingSent => {
             let Some(index) = match_result.mapping_index else {
@@ -253,7 +229,7 @@ fn write_residue(
                     "lsb requires an msb matching operator".to_owned(),
                 ));
             };
-            let lsb_bits = field.bit_len - msb_bits;
+            let lsb_bits = field.bit_len() - msb_bits;
             if lsb_bits == 0 {
                 return Ok(());
             }
@@ -262,7 +238,7 @@ fn write_residue(
             } else {
                 (1_u64 << lsb_bits) - 1
             };
-            writer.write_bits(field.value & mask, lsb_bits)
+            writer.write_bits(field.to_u64()? & mask, lsb_bits)
         }
     }
 }
@@ -295,20 +271,22 @@ fn append_bits(output: &mut BitWriter, input: &BitWriter) -> Result<()> {
     Ok(())
 }
 
-fn target_as_value(target: &TargetValue, bit_len: usize) -> Result<Option<u64>> {
+fn target_as_value(target: &TargetValue, bit_len: usize) -> Result<Option<FieldValue>> {
     match target {
         TargetValue::Bytes(bytes) => bytes_as_value(bytes, bit_len).map(Some),
         _ => Ok(None),
     }
 }
 
-fn bytes_as_value(bytes: &[u8], bit_len: usize) -> Result<u64> {
-    if bit_len > 64 {
-        return Err(SchcError::InvalidBitLength {
-            operation: "target_value",
-            bits: bit_len,
-        });
+fn bytes_as_value(bytes: &[u8], bit_len: usize) -> Result<FieldValue> {
+    if bit_len <= 64 {
+        let mut value = 0_u64;
+        for byte in bytes {
+            value = (value << 8) | u64::from(*byte);
+        }
+        return FieldValue::from_u64(value, bit_len);
     }
+
     let byte_len = bit_len.div_ceil(8);
     if bytes.len() > byte_len {
         return Err(SchcError::InvalidResidue(format!(
@@ -317,17 +295,9 @@ fn bytes_as_value(bytes: &[u8], bit_len: usize) -> Result<u64> {
         )));
     }
 
-    let mut value = 0_u64;
-    for byte in bytes {
-        value = (value << 8) | u64::from(*byte);
-    }
-    let unused_high_bits = byte_len * 8 - bit_len;
-    if unused_high_bits > 0 && value >= (1_u64 << bit_len) {
-        return Err(SchcError::InvalidResidue(
-            "target value does not fit field length".to_owned(),
-        ));
-    }
-    Ok(value)
+    let mut padded = vec![0; byte_len];
+    padded[..bytes.len()].copy_from_slice(bytes);
+    FieldValue::from_bytes(padded, bit_len)
 }
 
 fn extract_field(packet: &[u8], direction: Direction, parse: &ParseStep) -> Result<FieldValue> {
@@ -363,38 +333,38 @@ fn extract_ipv6_field(packet: &[u8], direction: Direction, name: &str) -> Result
     let ipv6 = Ipv6Packet::parse(packet)?;
     let bytes = ipv6.to_vec();
     match name {
-        "fid-ipv6-version" => FieldValue::new(u64::from(bytes[0] >> 4), 4),
+        "fid-ipv6-version" => FieldValue::from_u64(u64::from(bytes[0] >> 4), 4),
         "fid-ipv6-trafficclass" => {
             let value = (u64::from(bytes[0] & 0x0f) << 4) | u64::from(bytes[1] >> 4);
-            FieldValue::new(value, 8)
+            FieldValue::from_u64(value, 8)
         }
         "fid-ipv6-flowlabel" => {
             let value = (u64::from(bytes[1] & 0x0f) << 16)
                 | (u64::from(bytes[2]) << 8)
                 | u64::from(bytes[3]);
-            FieldValue::new(value, 20)
+            FieldValue::from_u64(value, 20)
         }
         "fid-ipv6-payload-length" => {
             let value = u64::from(u16::from_be_bytes([bytes[4], bytes[5]]));
-            FieldValue::new(value, 16)
+            FieldValue::from_u64(value, 16)
         }
-        "fid-ipv6-nextheader" => FieldValue::new(u64::from(bytes[6]), 8),
-        "fid-ipv6-hoplimit" => FieldValue::new(u64::from(bytes[7]), 8),
+        "fid-ipv6-nextheader" => FieldValue::from_u64(u64::from(bytes[6]), 8),
+        "fid-ipv6-hoplimit" => FieldValue::from_u64(u64::from(bytes[7]), 8),
         "fid-ipv6-devprefix" => {
             let address = role_address(&bytes, direction, Role::Device);
-            FieldValue::new(u64::from_be_bytes(address[0..8].try_into().unwrap()), 64)
+            FieldValue::from_u64(u64::from_be_bytes(address[0..8].try_into().unwrap()), 64)
         }
         "fid-ipv6-deviid" => {
             let address = role_address(&bytes, direction, Role::Device);
-            FieldValue::new(u64::from_be_bytes(address[8..16].try_into().unwrap()), 64)
+            FieldValue::from_u64(u64::from_be_bytes(address[8..16].try_into().unwrap()), 64)
         }
         "fid-ipv6-appprefix" => {
             let address = role_address(&bytes, direction, Role::Application);
-            FieldValue::new(u64::from_be_bytes(address[0..8].try_into().unwrap()), 64)
+            FieldValue::from_u64(u64::from_be_bytes(address[0..8].try_into().unwrap()), 64)
         }
         "fid-ipv6-appiid" => {
             let address = role_address(&bytes, direction, Role::Application);
-            FieldValue::new(u64::from_be_bytes(address[8..16].try_into().unwrap()), 64)
+            FieldValue::from_u64(u64::from_be_bytes(address[8..16].try_into().unwrap()), 64)
         }
         _ => Err(packet_error(
             "compression",
@@ -407,20 +377,24 @@ fn extract_udp_field(udp: &[u8], direction: Direction, name: &str) -> Result<Fie
     match name {
         "fid-udp-dev-port" => {
             let offset = if direction == Direction::Up { 0 } else { 2 };
-            FieldValue::new(
+            FieldValue::from_u64(
                 u64::from(u16::from_be_bytes([udp[offset], udp[offset + 1]])),
                 16,
             )
         }
         "fid-udp-app-port" => {
             let offset = if direction == Direction::Up { 2 } else { 0 };
-            FieldValue::new(
+            FieldValue::from_u64(
                 u64::from(u16::from_be_bytes([udp[offset], udp[offset + 1]])),
                 16,
             )
         }
-        "fid-udp-length" => FieldValue::new(u64::from(u16::from_be_bytes([udp[4], udp[5]])), 16),
-        "fid-udp-checksum" => FieldValue::new(u64::from(u16::from_be_bytes([udp[6], udp[7]])), 16),
+        "fid-udp-length" => {
+            FieldValue::from_u64(u64::from(u16::from_be_bytes([udp[4], udp[5]])), 16)
+        }
+        "fid-udp-checksum" => {
+            FieldValue::from_u64(u64::from(u16::from_be_bytes([udp[6], udp[7]])), 16)
+        }
         _ => Err(packet_error(
             "compression",
             format!("unsupported UDP field {name}"),
@@ -431,18 +405,19 @@ fn extract_udp_field(udp: &[u8], direction: Direction, name: &str) -> Result<Fie
 fn extract_coap_field(coap: &[u8], name: &str) -> Result<FieldValue> {
     crate::packet::CoapMessage::parse(coap)?;
     match name {
-        "fid-coap-version" => FieldValue::new(u64::from(coap[0] >> 6), 2),
-        "fid-coap-type" => FieldValue::new(u64::from((coap[0] >> 4) & 0x03), 2),
-        "fid-coap-tkl" => FieldValue::new(u64::from(coap[0] & 0x0f), 4),
-        "fid-coap-code" => FieldValue::new(u64::from(coap[1]), 8),
-        "fid-coap-mid" => FieldValue::new(u64::from(u16::from_be_bytes([coap[2], coap[3]])), 16),
+        "fid-coap-version" => FieldValue::from_u64(u64::from(coap[0] >> 6), 2),
+        "fid-coap-type" => FieldValue::from_u64(u64::from((coap[0] >> 4) & 0x03), 2),
+        "fid-coap-tkl" => FieldValue::from_u64(u64::from(coap[0] & 0x0f), 4),
+        "fid-coap-code" => FieldValue::from_u64(u64::from(coap[1]), 8),
+        "fid-coap-mid" => {
+            FieldValue::from_u64(u64::from(u16::from_be_bytes([coap[2], coap[3]])), 16)
+        }
         "fid-coap-token" => {
             let token_len = usize::from(coap[0] & 0x0f);
             if token_len > 8 {
                 return Err(packet_error("CoAP", "token length exceeds 8 bytes"));
             }
             bytes_as_value(&coap[4..4 + token_len], token_len * 8)
-                .and_then(|value| FieldValue::new(value, token_len * 8))
         }
         _ => Err(packet_error(
             "compression",
@@ -499,7 +474,7 @@ mod tests {
 
     #[test]
     fn equal_accepts_identical_bytes() {
-        let field = FieldValue::new(0x40, 8).unwrap();
+        let field = FieldValue::from_u64(0x40, 8).unwrap();
         let branch = branch(
             MatchingOperator::Equal,
             TargetValue::Bytes(vec![0x40]),
@@ -511,7 +486,7 @@ mod tests {
 
     #[test]
     fn ignore_accepts_any_bytes() {
-        let field = FieldValue::new(0xaa, 8).unwrap();
+        let field = FieldValue::from_u64(0xaa, 8).unwrap();
         let branch = branch(MatchingOperator::Ignore, TargetValue::None, Cda::NotSent);
 
         assert!(matches_branch(&field, &branch).unwrap().is_some());
@@ -519,7 +494,7 @@ mod tests {
 
     #[test]
     fn msb_accepts_matching_high_bits() {
-        let field = FieldValue::new(0b1010_1111, 8).unwrap();
+        let field = FieldValue::from_u64(0b1010_1111, 8).unwrap();
         let branch = branch(
             MatchingOperator::Msb(4),
             TargetValue::Bytes(vec![0b1010_0000]),
@@ -531,7 +506,7 @@ mod tests {
 
     #[test]
     fn match_mapping_accepts_table_members() {
-        let field = FieldValue::new(0x02, 8).unwrap();
+        let field = FieldValue::from_u64(0x02, 8).unwrap();
         let branch = branch(
             MatchingOperator::MatchMapping,
             TargetValue::Mapping(vec![vec![0x01], vec![0x02]]),
@@ -545,7 +520,7 @@ mod tests {
 
     #[test]
     fn mapping_sent_writes_selected_index() {
-        let field = FieldValue::new(0x02, 8).unwrap();
+        let field = FieldValue::from_u64(0x02, 8).unwrap();
         let branch = branch(
             MatchingOperator::MatchMapping,
             TargetValue::Mapping(vec![vec![0x01], vec![0x02]]),
@@ -562,7 +537,7 @@ mod tests {
 
     #[test]
     fn lsb_writes_only_low_bits_after_msb_match() {
-        let field = FieldValue::new(0b1010_1111, 8).unwrap();
+        let field = FieldValue::from_u64(0b1010_1111, 8).unwrap();
         let branch = branch(
             MatchingOperator::Msb(4),
             TargetValue::Bytes(vec![0b1010_0000]),

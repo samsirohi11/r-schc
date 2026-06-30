@@ -2,6 +2,7 @@
 
 use crate::bit::BitReader;
 use crate::error::{Result, SchcError};
+use crate::packet::field::FieldValue;
 use crate::rule::{
     Cda, Direction, FieldLength, FieldRef, FieldRule, MatchingOperator, Position, Rule,
     RuleContext, TargetValue,
@@ -52,30 +53,6 @@ impl Decompressor {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct FieldValue {
-    value: u64,
-    bit_len: usize,
-}
-
-impl FieldValue {
-    fn new(value: u64, bit_len: usize) -> Result<Self> {
-        if bit_len > 64 {
-            return Err(SchcError::InvalidBitLength {
-                operation: "decompress_field_value",
-                bits: bit_len,
-            });
-        }
-        if bit_len < 64 && value >= (1_u64 << bit_len) {
-            return Err(SchcError::InvalidBitLength {
-                operation: "decompress_field_value_fit",
-                bits: bit_len,
-            });
-        }
-        Ok(Self { value, bit_len })
-    }
-}
-
 #[derive(Debug, Default)]
 struct DecodedFields {
     values: Vec<(FieldRef, FieldValue)>,
@@ -94,9 +71,12 @@ impl DecodedFields {
 
     fn fixed_bits(&self, field: &FieldRef) -> Result<usize> {
         self.get(field)
-            .map(|value| usize::try_from(value.value))
-            .transpose()
-            .map_err(|_| SchcError::InvalidResidue("field value does not fit usize".to_owned()))?
+            .map(|value| {
+                usize::try_from(value.to_u64()?).map_err(|_| {
+                    SchcError::InvalidResidue("field value does not fit usize".to_owned())
+                })
+            })
+            .transpose()?
             .ok_or_else(|| missing_field(field))
     }
 
@@ -182,7 +162,7 @@ fn decode_field_value(
                 ))
             })
         }),
-        Cda::ValueSent => FieldValue::new(read_optional_bits(reader, bit_len)?, bit_len),
+        Cda::ValueSent => FieldValue::read_from(reader, bit_len),
         Cda::MappingSent => decode_mapping_sent(&field.target, bit_len, reader),
         Cda::Lsb => decode_lsb(field, bit_len, reader),
         Cda::Compute => unreachable!("compute fields are skipped before decoding"),
@@ -235,10 +215,10 @@ fn decode_lsb(field: &FieldRule, bit_len: usize, reader: &mut BitReader<'_>) -> 
     let value = if lsb_bits == 64 {
         lsb
     } else {
-        let msb_value = (target.value >> lsb_bits) << lsb_bits;
+        let msb_value = (target.to_u64()? >> lsb_bits) << lsb_bits;
         msb_value | lsb
     };
-    FieldValue::new(value, bit_len)
+    FieldValue::from_u64(value, bit_len)
 }
 
 fn read_optional_bits(reader: &mut BitReader<'_>, bit_len: usize) -> Result<u64> {
@@ -257,12 +237,14 @@ fn target_as_value(target: &TargetValue, bit_len: usize) -> Result<Option<FieldV
 }
 
 fn bytes_as_value(bytes: &[u8], bit_len: usize) -> Result<FieldValue> {
-    if bit_len > 64 {
-        return Err(SchcError::InvalidBitLength {
-            operation: "decompress_target_value",
-            bits: bit_len,
-        });
+    if bit_len <= 64 {
+        let mut value = 0_u64;
+        for byte in bytes {
+            value = (value << 8) | u64::from(*byte);
+        }
+        return FieldValue::from_u64(value, bit_len);
     }
+
     let byte_len = bit_len.div_ceil(8);
     if bytes.len() > byte_len {
         return Err(SchcError::InvalidResidue(format!(
@@ -271,11 +253,9 @@ fn bytes_as_value(bytes: &[u8], bit_len: usize) -> Result<FieldValue> {
         )));
     }
 
-    let mut value = 0_u64;
-    for byte in bytes {
-        value = (value << 8) | u64::from(*byte);
-    }
-    FieldValue::new(value, bit_len)
+    let mut padded = vec![0; byte_len];
+    padded[..bytes.len()].copy_from_slice(bytes);
+    FieldValue::from_bytes(padded, bit_len)
 }
 
 fn mapping_index_bits(len: usize) -> usize {
@@ -436,13 +416,13 @@ fn endpoint_address(
 }
 
 fn field_u64(field: &FieldValue) -> Result<u64> {
-    if field.bit_len != 64 {
+    if field.bit_len() != 64 {
         return Err(SchcError::InvalidResidue(format!(
             "address field is {} bits, expected 64",
-            field.bit_len
+            field.bit_len()
         )));
     }
-    Ok(field.value)
+    field.to_u64()
 }
 
 fn transport_checksum(

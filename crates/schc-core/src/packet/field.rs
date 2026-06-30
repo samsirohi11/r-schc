@@ -1,0 +1,135 @@
+//! Packet field values shared by compression and decompression.
+
+use crate::bit::{BitReader, BitWriter};
+use crate::error::{Result, SchcError};
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct FieldValue {
+    bytes: Vec<u8>,
+    bit_len: usize,
+}
+
+impl FieldValue {
+    pub(crate) fn from_bytes(bytes: Vec<u8>, bit_len: usize) -> Result<Self> {
+        if bit_len > bytes.len() * 8 {
+            return Err(SchcError::InvalidBitLength {
+                operation: "field_value_from_bytes",
+                bits: bit_len,
+            });
+        }
+        let mut bytes = bytes;
+        bytes.truncate(bit_len.div_ceil(8));
+        if bit_len == 0 {
+            bytes.clear();
+            return Ok(Self { bytes, bit_len });
+        }
+        let unused_bits = bytes.len() * 8 - bit_len;
+        if unused_bits > 0 {
+            let mask = (1_u8 << unused_bits) - 1;
+            if bytes.last().is_some_and(|last| last & mask != 0) {
+                return Err(SchcError::InvalidResidue(
+                    "field value has non-zero unused bits".to_owned(),
+                ));
+            }
+        }
+        Ok(Self { bytes, bit_len })
+    }
+
+    pub(crate) fn from_u64(value: u64, bit_len: usize) -> Result<Self> {
+        if bit_len > 64 {
+            return Err(SchcError::InvalidBitLength {
+                operation: "field_value_from_u64",
+                bits: bit_len,
+            });
+        }
+        if bit_len < 64 && value >= (1_u64 << bit_len) {
+            return Err(SchcError::InvalidBitLength {
+                operation: "field_value_from_u64_fit",
+                bits: bit_len,
+            });
+        }
+        let mut writer = BitWriter::new();
+        if bit_len > 0 {
+            writer.write_bits(value, bit_len)?;
+        }
+        Self::from_bytes(writer.to_vec(), bit_len)
+    }
+
+    pub(crate) fn read_from(reader: &mut BitReader<'_>, bit_len: usize) -> Result<Self> {
+        Self::from_bytes(reader.read_bytes_padded(bit_len)?, bit_len)
+    }
+
+    pub(crate) fn write_to(&self, writer: &mut BitWriter) -> Result<()> {
+        let mut reader = BitReader::new(self.bytes());
+        for _ in 0..self.bit_len {
+            writer.write_bits(reader.read_bits(1)?, 1)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub(crate) const fn bit_len(&self) -> usize {
+        self.bit_len
+    }
+
+    pub(crate) fn to_u64(&self) -> Result<u64> {
+        if self.bit_len > 64 {
+            return Err(SchcError::InvalidBitLength {
+                operation: "field_value_to_u64",
+                bits: self.bit_len,
+            });
+        }
+        let mut reader = BitReader::new(&self.bytes);
+        if self.bit_len == 0 {
+            Ok(0)
+        } else {
+            reader.read_bits(self.bit_len)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FieldValue;
+    use crate::bit::{BitReader, BitWriter};
+
+    #[test]
+    fn writes_non_byte_aligned_value() {
+        let value = FieldValue::from_u64(0b101, 3).unwrap();
+        let mut writer = BitWriter::new();
+
+        value.write_to(&mut writer).unwrap();
+
+        assert_eq!(writer.bit_len(), 3);
+        assert_eq!(writer.to_vec(), vec![0b1010_0000]);
+    }
+
+    #[test]
+    fn reads_non_byte_aligned_value() {
+        let mut reader = BitReader::new(&[0b1011_0000]);
+
+        let value = FieldValue::read_from(&mut reader, 5).unwrap();
+
+        assert_eq!(value.bit_len(), 5);
+        assert_eq!(value.to_u64().unwrap(), 0b10110);
+    }
+
+    #[test]
+    fn preserves_payload_larger_than_u64() {
+        let bytes = b"temperature=21.5".to_vec();
+
+        let value = FieldValue::from_bytes(bytes.clone(), bytes.len() * 8).unwrap();
+
+        assert_eq!(value.bytes(), bytes.as_slice());
+        assert_eq!(value.bit_len(), bytes.len() * 8);
+        assert!(value.to_u64().is_err());
+    }
+
+    #[test]
+    fn rejects_non_zero_unused_bits() {
+        assert!(FieldValue::from_bytes(vec![0b0001_0000], 3).is_err());
+    }
+}
