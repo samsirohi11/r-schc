@@ -83,6 +83,20 @@ fn icmpv6_rejects_truncated_messages_and_preserves_bytes() {
 }
 
 #[test]
+fn icmpv6_message_builds_echo_payload() {
+    let icmp = Icmpv6Message::from_parts(128, 0, 0x333e, b"\x12\x34\x00\x01ping".to_vec()).unwrap();
+
+    assert_eq!(icmp.message_type(), 128);
+    assert_eq!(icmp.code(), 0);
+    assert_eq!(icmp.checksum(), 0x333e);
+    assert_eq!(icmp.payload(), b"\x12\x34\x00\x01ping");
+    assert_eq!(
+        icmp.to_vec(),
+        hex::decode("8000333e1234000170696e67").unwrap()
+    );
+}
+
+#[test]
 fn coap_message_builds_token_options_and_payload() {
     let message = CoapMessage::from_parts(
         1,

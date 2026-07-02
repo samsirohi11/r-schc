@@ -54,6 +54,22 @@ impl Icmpv6Message {
     pub fn to_vec(&self) -> Vec<u8> {
         self.bytes.clone()
     }
+
+    /// Builds an `ICMPv6` message from header fields and payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::Packet`] when the constructed bytes do not parse
+    /// back into a valid message, which can only happen if the payload
+    /// overflows the available capacity.
+    pub fn from_parts(message_type: u8, code: u8, checksum: u16, payload: Vec<u8>) -> Result<Self> {
+        let mut bytes = Vec::with_capacity(4 + payload.len());
+        bytes.push(message_type);
+        bytes.push(code);
+        bytes.extend_from_slice(&checksum.to_be_bytes());
+        bytes.extend(payload);
+        Self::parse(&bytes)
+    }
 }
 
 fn packet_error(protocol: &'static str, reason: impl Into<String>) -> SchcError {

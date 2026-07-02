@@ -423,10 +423,11 @@ fn extract_field(
                 .ok_or(SchcError::NoMatchingRule)?;
             FieldValue::from_bytes(option.value().to_vec(), option.value().len() * 8)
         }
-        FieldRef::Icmpv6(name) => Err(packet_error(
-            "compression",
-            format!("unsupported ICMPv6 field {name}"),
-        )),
+        FieldRef::Icmpv6(name) => {
+            let ipv6 = Ipv6Packet::parse(packet)?;
+            let icmp = crate::packet::Icmpv6Message::parse(ipv6.payload())?;
+            extract_icmpv6_field(&icmp.to_vec(), name)
+        }
         FieldRef::SyntheticCoapMarker => Err(packet_error(
             "compression",
             "unsupported synthetic CoAP marker field",
@@ -542,6 +543,22 @@ fn extract_coap_field(coap: &[u8], name: &str, bit_len: Option<usize>) -> Result
         _ => Err(packet_error(
             "compression",
             format!("unsupported CoAP field {name}"),
+        )),
+    }
+}
+
+fn extract_icmpv6_field(icmp: &[u8], name: &str) -> Result<FieldValue> {
+    crate::packet::Icmpv6Message::parse(icmp)?;
+    match name {
+        "fid-icmpv6-type" => FieldValue::from_u64(u64::from(icmp[0]), 8),
+        "fid-icmpv6-code" => FieldValue::from_u64(u64::from(icmp[1]), 8),
+        "fid-icmpv6-checksum" => {
+            FieldValue::from_u64(u64::from(u16::from_be_bytes([icmp[2], icmp[3]])), 16)
+        }
+        "fid-icmpv6-payload" => FieldValue::from_bytes(icmp[4..].to_vec(), (icmp.len() - 4) * 8),
+        _ => Err(packet_error(
+            "compression",
+            format!("unsupported ICMPv6 field {name}"),
         )),
     }
 }
