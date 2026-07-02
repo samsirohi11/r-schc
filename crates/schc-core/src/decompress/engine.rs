@@ -3,6 +3,7 @@
 use crate::bit::{BitReader, BitWriter};
 use crate::error::{Result, SchcError};
 use crate::packet::{
+    checksum::transport_checksum,
     field::{FieldKey, FieldStore, FieldValue},
     length::{read_variable_length_prefix, LengthResolver},
 };
@@ -46,7 +47,7 @@ impl Decompressor {
         let direction = inverse_direction(position);
         let fields = decode_fields(rule, direction, &mut reader)?;
         validate_padding(&mut reader)?;
-        reconstruct_packet(direction, &fields)
+        crate::packet::builder::reconstruct_packet(direction, &fields)
     }
 
     /// Returns the rule context used by this decompressor.
@@ -280,6 +281,13 @@ fn validate_padding(reader: &mut BitReader<'_>) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn reconstruct_packet_for_builder(
+    direction: Direction,
+    fields: &FieldStore,
+) -> Result<Vec<u8>> {
+    reconstruct_packet(direction, fields)
+}
+
 fn reconstruct_packet(direction: Direction, fields: &FieldStore) -> Result<Vec<u8>> {
     let coap = if fields
         .first_by_field(&FieldRef::Coap("fid-coap-version"))
@@ -465,66 +473,11 @@ fn first_value<'a>(fields: &'a FieldStore, field: &FieldRef) -> Result<&'a Field
         .ok_or_else(|| SchcError::InvalidResidue(format!("missing reconstructed field {field:?}")))
 }
 
-fn transport_checksum(
-    source: &[u8; 16],
-    destination: &[u8; 16],
-    next_header: u8,
-    segment: &[u8],
-) -> u16 {
-    let mut sum = Checksum::default();
-    sum.add_bytes(source);
-    sum.add_bytes(destination);
-    sum.add_u32(u32::try_from(segment.len()).expect("segment length fits u32"));
-    sum.add_bytes(&[0, 0, 0, next_header]);
-    sum.add_bytes(segment);
-    sum.finish()
-}
-
-#[derive(Debug, Default)]
-struct Checksum {
-    sum: u32,
-    pending: Option<u8>,
-}
-
-impl Checksum {
-    fn add_u32(&mut self, value: u32) {
-        self.add_bytes(&value.to_be_bytes());
-    }
-
-    fn add_bytes(&mut self, bytes: &[u8]) {
-        for byte in bytes {
-            if let Some(high) = self.pending.take() {
-                self.add_word(u16::from_be_bytes([high, *byte]));
-            } else {
-                self.pending = Some(*byte);
-            }
-        }
-    }
-
-    fn finish(mut self) -> u16 {
-        if let Some(high) = self.pending.take() {
-            self.add_word(u16::from_be_bytes([high, 0]));
-        }
-        while self.sum > 0xffff {
-            self.sum = (self.sum & 0xffff) + (self.sum >> 16);
-        }
-        let checksum = !u16::try_from(self.sum).expect("folded checksum fits u16");
-        if checksum == 0 {
-            0xffff
-        } else {
-            checksum
-        }
-    }
-
-    fn add_word(&mut self, word: u16) {
-        self.sum += u32::from(word);
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{decode_lsb, select_rule, transport_checksum};
+    use super::{decode_lsb, select_rule};
     use crate::bit::BitReader;
+    use crate::packet::checksum::transport_checksum;
     use crate::rule::FieldRule;
     use crate::{
         Cda, DirectionSelector, FieldLength, FieldRef, MatchingOperator, Rule, RuleId, RuleSet,

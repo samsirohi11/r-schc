@@ -1,5 +1,5 @@
 //! SCHC decompression.
 
-mod engine;
+pub(crate) mod engine;
 
 pub use engine::Decompressor;

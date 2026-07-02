@@ -1,5 +1,7 @@
 //! Packet parsing and serialization.
 
+pub(crate) mod builder;
+pub(crate) mod checksum;
 pub(crate) mod field;
 pub(crate) mod length;
 
