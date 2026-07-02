@@ -118,6 +118,22 @@ fn compressor_uses_tkl_to_send_token_length() {
 }
 
 #[test]
+fn coap_token_round_trip_uses_dynamic_length() {
+    let context = dynamic_token_context();
+    let packet = coap_token_packet();
+
+    let compressor = Compressor::new(context.clone()).unwrap();
+    let compressed = compressor.compress(Direction::Up, &packet).unwrap();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    let restored = decompressor
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+
+    assert_eq!(restored, packet);
+}
+
+#[test]
 fn compressor_reports_no_matching_rule_for_equal_mismatch() {
     let compressor = compressor();
     let mut packet = coap_get_packet();

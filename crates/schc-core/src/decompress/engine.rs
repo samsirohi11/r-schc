@@ -2,7 +2,10 @@
 
 use crate::bit::{BitReader, BitWriter};
 use crate::error::{Result, SchcError};
-use crate::packet::field::FieldValue;
+use crate::packet::{
+    field::{FieldKey, FieldStore, FieldValue},
+    length::{read_variable_length_prefix, LengthResolver},
+};
 use crate::rule::{
     Cda, Direction, FieldLength, FieldRef, FieldRule, MatchingOperator, Position, Rule,
     RuleContext, TargetValue,
@@ -53,46 +56,6 @@ impl Decompressor {
     }
 }
 
-#[derive(Debug, Default)]
-struct DecodedFields {
-    values: Vec<(FieldRef, FieldValue)>,
-}
-
-impl DecodedFields {
-    fn push(&mut self, field: FieldRef, value: FieldValue) {
-        self.values.push((field, value));
-    }
-
-    fn get(&self, field: &FieldRef) -> Option<&FieldValue> {
-        self.values
-            .iter()
-            .find_map(|(candidate, value)| (candidate == field).then_some(value))
-    }
-
-    fn fixed_bits(&self, field: &FieldRef) -> Result<usize> {
-        self.get(field)
-            .map(|value| {
-                usize::try_from(value.to_u64()?).map_err(|_| {
-                    SchcError::InvalidResidue("field value does not fit usize".to_owned())
-                })
-            })
-            .transpose()?
-            .ok_or_else(|| missing_field(field))
-    }
-
-    fn fixed_u8(&self, field: &FieldRef) -> Result<u8> {
-        let value = self.fixed_bits(field)?;
-        u8::try_from(value)
-            .map_err(|_| SchcError::InvalidResidue(format!("field {field:?} does not fit u8")))
-    }
-
-    fn fixed_u16(&self, field: &FieldRef) -> Result<u16> {
-        let value = self.fixed_bits(field)?;
-        u16::try_from(value)
-            .map_err(|_| SchcError::InvalidResidue(format!("field {field:?} does not fit u16")))
-    }
-}
-
 fn select_rule<'a>(rules: &'a [Rule], compressed: &'a [u8]) -> Result<(&'a Rule, BitReader<'a>)> {
     for rule in rules {
         let mut reader = BitReader::new(compressed);
@@ -119,8 +82,9 @@ fn decode_fields(
     rule: &Rule,
     direction: Direction,
     reader: &mut BitReader<'_>,
-) -> Result<DecodedFields> {
-    let mut fields = DecodedFields::default();
+) -> Result<FieldStore> {
+    let mut fields = FieldStore::default();
+    let mut lengths = LengthResolver::default();
     for field in rule
         .fields()
         .iter()
@@ -129,23 +93,31 @@ fn decode_fields(
         if matches!(field.action, Cda::Compute) {
             continue;
         }
-        let bit_len = fixed_field_len(&field.length)?;
+        let bit_len = decode_field_len(field, reader, &lengths, &fields)?;
         let value = decode_field_value(field, bit_len, reader)?;
-        fields.push(field.field.clone(), value);
+        if matches!(field.field, FieldRef::Coap("fid-coap-tkl")) {
+            lengths.set_token_length(usize::try_from(value.to_u64()?).map_err(|_| {
+                SchcError::InvalidResidue("CoAP TKL does not fit usize".to_owned())
+            })?);
+        }
+        fields.insert(
+            FieldKey::new(field.field.clone(), field.field_position, field.entry_index),
+            value,
+        );
     }
     Ok(fields)
 }
 
-fn fixed_field_len(length: &FieldLength) -> Result<usize> {
-    match length {
-        FieldLength::FixedBits(bits) => Ok(*bits),
-        FieldLength::VariableBytes
-        | FieldLength::VariableBits
-        | FieldLength::TokenLength
-        | FieldLength::FromPreviousField { .. }
-        | FieldLength::FunctionSid(_) => Err(SchcError::InvalidResidue(
-            "decompression only supports fixed-length fields for this task".to_owned(),
-        )),
+fn decode_field_len(
+    field: &FieldRule,
+    reader: &mut BitReader<'_>,
+    lengths: &LengthResolver,
+    fields: &FieldStore,
+) -> Result<usize> {
+    match &field.length {
+        FieldLength::VariableBytes => Ok(read_variable_length_prefix(reader)? * 8),
+        FieldLength::VariableBits => read_variable_length_prefix(reader),
+        length => lengths.resolve(length, fields),
     }
 }
 
@@ -308,40 +280,63 @@ fn validate_padding(reader: &mut BitReader<'_>) -> Result<()> {
     Ok(())
 }
 
-fn reconstruct_packet(direction: Direction, fields: &DecodedFields) -> Result<Vec<u8>> {
+fn reconstruct_packet(direction: Direction, fields: &FieldStore) -> Result<Vec<u8>> {
     let coap = reconstruct_coap(fields)?;
     let udp = reconstruct_udp(direction, fields, &coap)?;
     reconstruct_ipv6(direction, fields, &udp)
 }
 
-fn reconstruct_coap(fields: &DecodedFields) -> Result<Vec<u8>> {
-    let version = fields.fixed_u8(&FieldRef::Coap("fid-coap-version"))?;
-    let message_type = fields.fixed_u8(&FieldRef::Coap("fid-coap-type"))?;
-    let token_len = fields.fixed_u8(&FieldRef::Coap("fid-coap-tkl"))?;
-    let code = fields.fixed_u8(&FieldRef::Coap("fid-coap-code"))?;
-    let message_id = fields.fixed_u16(&FieldRef::Coap("fid-coap-mid"))?;
+fn reconstruct_coap(fields: &FieldStore) -> Result<Vec<u8>> {
+    let version = first_u8(fields, &FieldRef::Coap("fid-coap-version"))?;
+    let message_type = first_u8(fields, &FieldRef::Coap("fid-coap-type"))?;
+    let token_len = first_u8(fields, &FieldRef::Coap("fid-coap-tkl"))?;
+    let code = first_u8(fields, &FieldRef::Coap("fid-coap-code"))?;
+    let message_id = first_u16(fields, &FieldRef::Coap("fid-coap-mid"))?;
 
     if version > 3 || message_type > 3 || token_len > 8 {
         return Err(SchcError::InvalidResidue(
             "CoAP fixed header fields are out of range".to_owned(),
         ));
     }
-    if token_len != 0 {
-        return Err(SchcError::InvalidResidue(
-            "CoAP token reconstruction is not supported by this fixture".to_owned(),
-        ));
-    }
 
-    let mut output = Vec::with_capacity(4);
+    let token = fields
+        .first_by_field(&FieldRef::Coap("fid-coap-token"))
+        .map(|value| {
+            if value.bit_len() != usize::from(token_len) * 8 {
+                return Err(SchcError::InvalidResidue(
+                    "CoAP token length does not match TKL".to_owned(),
+                ));
+            }
+            Ok(value.bytes())
+        })
+        .transpose()?;
+    let token = match (token_len, token) {
+        (0, None) => &[][..],
+        (0, Some(value)) if value.is_empty() => value,
+        (0, Some(_)) => {
+            return Err(SchcError::InvalidResidue(
+                "CoAP token present with zero TKL".to_owned(),
+            ));
+        }
+        (_, Some(value)) => value,
+        (_, None) => {
+            return Err(SchcError::InvalidResidue(
+                "missing reconstructed CoAP token".to_owned(),
+            ));
+        }
+    };
+
+    let mut output = Vec::with_capacity(4 + token.len());
     output.push((version << 6) | (message_type << 4) | token_len);
     output.push(code);
     output.extend_from_slice(&message_id.to_be_bytes());
+    output.extend_from_slice(token);
     Ok(output)
 }
 
-fn reconstruct_udp(direction: Direction, fields: &DecodedFields, coap: &[u8]) -> Result<Vec<u8>> {
-    let dev_port = fields.fixed_u16(&FieldRef::Udp("fid-udp-dev-port"))?;
-    let app_port = fields.fixed_u16(&FieldRef::Udp("fid-udp-app-port"))?;
+fn reconstruct_udp(direction: Direction, fields: &FieldStore, coap: &[u8]) -> Result<Vec<u8>> {
+    let dev_port = first_u16(fields, &FieldRef::Udp("fid-udp-dev-port"))?;
+    let app_port = first_u16(fields, &FieldRef::Udp("fid-udp-app-port"))?;
     let (source_port, destination_port) = match direction {
         Direction::Up => (dev_port, app_port),
         Direction::Down => (app_port, dev_port),
@@ -359,12 +354,12 @@ fn reconstruct_udp(direction: Direction, fields: &DecodedFields, coap: &[u8]) ->
     Ok(output)
 }
 
-fn reconstruct_ipv6(direction: Direction, fields: &DecodedFields, udp: &[u8]) -> Result<Vec<u8>> {
-    let version = fields.fixed_u8(&FieldRef::Ipv6("fid-ipv6-version"))?;
-    let traffic_class = fields.fixed_u8(&FieldRef::Ipv6("fid-ipv6-trafficclass"))?;
-    let flow_label = fields.fixed_bits(&FieldRef::Ipv6("fid-ipv6-flowlabel"))?;
-    let next_header = fields.fixed_u8(&FieldRef::Ipv6("fid-ipv6-nextheader"))?;
-    let hop_limit = fields.fixed_u8(&FieldRef::Ipv6("fid-ipv6-hoplimit"))?;
+fn reconstruct_ipv6(direction: Direction, fields: &FieldStore, udp: &[u8]) -> Result<Vec<u8>> {
+    let version = first_u8(fields, &FieldRef::Ipv6("fid-ipv6-version"))?;
+    let traffic_class = first_u8(fields, &FieldRef::Ipv6("fid-ipv6-trafficclass"))?;
+    let flow_label = first_usize(fields, &FieldRef::Ipv6("fid-ipv6-flowlabel"))?;
+    let next_header = first_u8(fields, &FieldRef::Ipv6("fid-ipv6-nextheader"))?;
+    let hop_limit = first_u8(fields, &FieldRef::Ipv6("fid-ipv6-hoplimit"))?;
     let payload_len = u16::try_from(udp.len()).map_err(|_| {
         SchcError::InvalidResidue("IPv6 payload is too large to encode length".to_owned())
     })?;
@@ -395,10 +390,7 @@ fn reconstruct_ipv6(direction: Direction, fields: &DecodedFields, udp: &[u8]) ->
     Ok(output)
 }
 
-fn endpoint_addresses(
-    direction: Direction,
-    fields: &DecodedFields,
-) -> Result<([u8; 16], [u8; 16])> {
+fn endpoint_addresses(direction: Direction, fields: &FieldStore) -> Result<([u8; 16], [u8; 16])> {
     let device = endpoint_address(
         fields,
         &FieldRef::Ipv6("fid-ipv6-devprefix"),
@@ -417,16 +409,12 @@ fn endpoint_addresses(
 }
 
 fn endpoint_address(
-    fields: &DecodedFields,
+    fields: &FieldStore,
     prefix_field: &FieldRef,
     iid_field: &FieldRef,
 ) -> Result<[u8; 16]> {
-    let prefix = fields
-        .get(prefix_field)
-        .ok_or_else(|| missing_field(prefix_field))?;
-    let iid = fields
-        .get(iid_field)
-        .ok_or_else(|| missing_field(iid_field))?;
+    let prefix = first_value(fields, prefix_field)?;
+    let iid = first_value(fields, iid_field)?;
     let mut address = [0; 16];
     address[0..8].copy_from_slice(&field_u64(prefix)?.to_be_bytes());
     address[8..16].copy_from_slice(&field_u64(iid)?.to_be_bytes());
@@ -441,6 +429,30 @@ fn field_u64(field: &FieldValue) -> Result<u64> {
         )));
     }
     field.to_u64()
+}
+
+fn first_u8(fields: &FieldStore, field: &FieldRef) -> Result<u8> {
+    let value = first_value(fields, field)?;
+    u8::try_from(value.to_u64()?)
+        .map_err(|_| SchcError::InvalidResidue("field does not fit u8".to_owned()))
+}
+
+fn first_u16(fields: &FieldStore, field: &FieldRef) -> Result<u16> {
+    let value = first_value(fields, field)?;
+    u16::try_from(value.to_u64()?)
+        .map_err(|_| SchcError::InvalidResidue("field does not fit u16".to_owned()))
+}
+
+fn first_usize(fields: &FieldStore, field: &FieldRef) -> Result<usize> {
+    let value = first_value(fields, field)?;
+    usize::try_from(value.to_u64()?)
+        .map_err(|_| SchcError::InvalidResidue("field does not fit usize".to_owned()))
+}
+
+fn first_value<'a>(fields: &'a FieldStore, field: &FieldRef) -> Result<&'a FieldValue> {
+    fields
+        .first_by_field(field)
+        .ok_or_else(|| SchcError::InvalidResidue(format!("missing reconstructed field {field:?}")))
 }
 
 fn transport_checksum(
@@ -497,10 +509,6 @@ impl Checksum {
     fn add_word(&mut self, word: u16) {
         self.sum += u32::from(word);
     }
-}
-
-fn missing_field(field: &FieldRef) -> SchcError {
-    SchcError::InvalidResidue(format!("missing reconstructed field {field:?}"))
 }
 
 #[cfg(test)]
