@@ -269,16 +269,16 @@ fn cbor_rules_resolve_known_field_length_function_sids() {
                             2001,
                             3001,
                         ),
-                        normal_field_with_length_value(
-                            2,
-                            1207,
-                            tagged(45, int(5001)),
-                            int(0),
-                            4000,
-                            bytes(&[]),
-                            2001,
-                            3001,
-                        ),
+                        normal_field_with_length_value(NormalFieldWithLengthValue {
+                            entry_index: 2,
+                            field_sid: 1207,
+                            length: tagged(45, int(5001)),
+                            length_value: int(0),
+                            direction_sid: 4000,
+                            target: bytes(&[]),
+                            matching_sid: 2001,
+                            cda_sid: 3001,
+                        }),
                     ]),
                 ),
             ])]),
@@ -322,7 +322,7 @@ fn normal_field_with_length(
     ])
 }
 
-fn normal_field_with_length_value(
+struct NormalFieldWithLengthValue {
     entry_index: i128,
     field_sid: i128,
     length: ciborium::value::Value,
@@ -331,17 +331,19 @@ fn normal_field_with_length_value(
     target: ciborium::value::Value,
     matching_sid: i128,
     cda_sid: i128,
-) -> ciborium::value::Value {
+}
+
+fn normal_field_with_length_value(field: NormalFieldWithLengthValue) -> ciborium::value::Value {
     map(vec![
-        (int(1), int(entry_index)),
-        (int(3), int(field_sid)),
-        (int(4), length),
-        (int(5), length_value),
-        (int(6), int(direction_sid)),
+        (int(1), int(field.entry_index)),
+        (int(3), int(field.field_sid)),
+        (int(4), field.length),
+        (int(5), field.length_value),
+        (int(6), int(field.direction_sid)),
         (int(7), int(1)),
-        (int(8), target_list(vec![target])),
-        (int(11), int(matching_sid)),
-        (int(15), int(cda_sid)),
+        (int(8), target_list(vec![field.target])),
+        (int(11), int(field.matching_sid)),
+        (int(15), int(field.cda_sid)),
     ])
 }
 
