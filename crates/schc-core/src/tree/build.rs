@@ -103,6 +103,7 @@ fn branch_groups<'rule>(
             parse: ParseStep {
                 field: field_rule.field.clone(),
                 length: field_rule.length.clone(),
+                field_position: field_rule.field_position,
                 entry_index: field_rule.entry_index,
             },
             field_position: field_rule.field_position,

@@ -2,8 +2,12 @@
 
 use crate::bit::{BitReader, BitWriter};
 use crate::error::{Result, SchcError};
-use crate::packet::{field::FieldValue, Ipv6Packet, UdpDatagram};
-use crate::rule::{Cda, Direction, FieldRef, MatchingOperator, RuleContext};
+use crate::packet::{
+    field::{FieldKey, FieldStore, FieldValue},
+    length::LengthResolver,
+    Ipv6Packet, UdpDatagram,
+};
+use crate::rule::{Cda, Direction, FieldLength, FieldRef, MatchingOperator, RuleContext};
 use crate::tree::{Branch, DecisionTree, ParseStep};
 use crate::TargetValue;
 
@@ -73,8 +77,8 @@ impl Compressor {
         Ipv6Packet::parse(packet)?;
 
         let mut candidates = Vec::new();
-        let residue = BitWriter::new();
-        self.traverse(0, direction, packet, &residue, &mut candidates)?;
+        let state = CompressionState::default();
+        self.traverse(0, direction, packet, &state, &mut candidates)?;
 
         candidates
             .into_iter()
@@ -100,14 +104,14 @@ impl Compressor {
         node_index: usize,
         direction: Direction,
         packet: &[u8],
-        residue: &BitWriter,
+        state: &CompressionState,
         candidates: &mut Vec<Candidate>,
     ) -> Result<()> {
         let node = &self.tree.nodes()[node_index];
         if let (Some(rule_id), Some(rule_order)) = (node.rule_id, node.rule_order) {
             let mut writer = BitWriter::new();
             writer.write_bits(rule_id.value(), rule_id.bit_len())?;
-            append_bits(&mut writer, residue)?;
+            append_bits(&mut writer, &state.residue)?;
             candidates.push(Candidate {
                 rule_order,
                 datagram: CompressedDatagram {
@@ -122,17 +126,58 @@ impl Compressor {
                 continue;
             }
 
-            let field = extract_field(packet, direction, &branch.parse)?;
+            let bit_len = match &branch.parse.length {
+                FieldLength::VariableBytes | FieldLength::VariableBits => None,
+                length => Some(state.lengths.resolve(length, &state.fields)?),
+            };
+            let field = extract_field(packet, direction, &branch.parse, bit_len)?;
             let Some(match_result) = matches_branch(&field, &branch)? else {
                 continue;
             };
 
-            let mut next_residue = residue.clone();
-            write_residue(&mut next_residue, &field, &branch, &match_result)?;
-            self.traverse(branch.next, direction, packet, &next_residue, candidates)?;
+            let mut next_state = state.clone();
+            write_residue(&mut next_state.residue, &field, &branch, &match_result)?;
+            if let FieldRef::Coap("fid-coap-tkl") = branch.parse.field {
+                let token_length = usize::try_from(field.to_u64()?).map_err(|_| {
+                    SchcError::InvalidResidue("CoAP TKL does not fit usize".to_owned())
+                })?;
+                next_state.lengths.set_token_length(token_length);
+            }
+            next_state.fields.insert(
+                FieldKey::new(
+                    branch.parse.field.clone(),
+                    branch.parse.field_position,
+                    branch.parse.entry_index,
+                ),
+                field,
+            );
+            self.traverse(branch.next, direction, packet, &next_state, candidates)?;
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CompressionState {
+    residue: BitWriter,
+    fields: FieldStore,
+    lengths: LengthResolver,
+    #[allow(dead_code)]
+    coap_option_index: usize,
+    #[allow(dead_code)]
+    residual_tail: Vec<u8>,
+}
+
+impl Default for CompressionState {
+    fn default() -> Self {
+        Self {
+            residue: BitWriter::new(),
+            fields: FieldStore::default(),
+            lengths: LengthResolver::default(),
+            coap_option_index: 0,
+            residual_tail: Vec::new(),
+        }
     }
 }
 
@@ -325,7 +370,12 @@ fn bytes_as_value(bytes: &[u8], bit_len: usize) -> Result<FieldValue> {
     FieldValue::from_bytes(padded, bit_len)
 }
 
-fn extract_field(packet: &[u8], direction: Direction, parse: &ParseStep) -> Result<FieldValue> {
+fn extract_field(
+    packet: &[u8],
+    direction: Direction,
+    parse: &ParseStep,
+    bit_len: Option<usize>,
+) -> Result<FieldValue> {
     match &parse.field {
         FieldRef::Ipv6(name) => extract_ipv6_field(packet, direction, name),
         FieldRef::Udp(name) => {
@@ -336,7 +386,7 @@ fn extract_field(packet: &[u8], direction: Direction, parse: &ParseStep) -> Resu
         FieldRef::Coap(name) => {
             let ipv6 = Ipv6Packet::parse(packet)?;
             let udp = UdpDatagram::parse(ipv6.payload())?;
-            extract_coap_field(udp.payload(), name)
+            extract_coap_field(udp.payload(), name, bit_len)
         }
         FieldRef::Icmpv6(name) => Err(packet_error(
             "compression",
@@ -427,7 +477,7 @@ fn extract_udp_field(udp: &[u8], direction: Direction, name: &str) -> Result<Fie
     }
 }
 
-fn extract_coap_field(coap: &[u8], name: &str) -> Result<FieldValue> {
+fn extract_coap_field(coap: &[u8], name: &str, bit_len: Option<usize>) -> Result<FieldValue> {
     crate::packet::CoapMessage::parse(coap)?;
     match name {
         "fid-coap-version" => FieldValue::from_u64(u64::from(coap[0] >> 6), 2),
@@ -438,7 +488,16 @@ fn extract_coap_field(coap: &[u8], name: &str) -> Result<FieldValue> {
             FieldValue::from_u64(u64::from(u16::from_be_bytes([coap[2], coap[3]])), 16)
         }
         "fid-coap-token" => {
-            let token_len = usize::from(coap[0] & 0x0f);
+            let bit_len = bit_len.ok_or_else(|| {
+                SchcError::InvalidResidue("CoAP token length is not available".to_owned())
+            })?;
+            if bit_len % 8 != 0 {
+                return Err(packet_error("CoAP", "token length is not byte aligned"));
+            }
+            let token_len = bit_len / 8;
+            if token_len != usize::from(coap[0] & 0x0f) {
+                return Err(packet_error("CoAP", "token length does not match TKL"));
+            }
             if token_len > 8 {
                 return Err(packet_error("CoAP", "token length exceeds 8 bytes"));
             }
@@ -476,8 +535,8 @@ fn packet_error(protocol: &'static str, reason: impl Into<String>) -> SchcError 
 #[cfg(test)]
 mod tests {
     use super::{
-        matches_branch, write_residue, Branch, Cda, FieldRef, FieldValue, MatchingOperator,
-        ParseStep, TargetValue,
+        extract_coap_field, matches_branch, write_residue, Branch, Cda, FieldRef, FieldValue,
+        MatchingOperator, ParseStep, TargetValue,
     };
     use crate::bit::BitWriter;
     use crate::{DirectionSelector, FieldLength};
@@ -487,6 +546,7 @@ mod tests {
             parse: ParseStep {
                 field: FieldRef::Ipv6("fid-ipv6-hoplimit"),
                 length: FieldLength::FixedBits(8),
+                field_position: 1,
                 entry_index: 0,
             },
             direction: DirectionSelector::Bidirectional,
@@ -581,6 +641,15 @@ mod tests {
 
         assert_eq!(writer.bit_len(), 128);
         assert_eq!(writer.to_vec(), b"temperature=21.5");
+    }
+
+    #[test]
+    fn coap_token_rejects_resolved_length_that_is_shorter_than_packet_tkl() {
+        let coap = [0x42, 0x01, 0x12, 0x34, 0xaa, 0xbb];
+
+        let error = extract_coap_field(&coap, "fid-coap-token", Some(8)).unwrap_err();
+
+        assert!(matches!(error, crate::SchcError::Packet { .. }));
     }
 
     #[test]

@@ -7,6 +7,8 @@ pub struct ParseStep {
     pub field: FieldRef,
     /// Field length rule.
     pub length: FieldLength,
+    /// Field position inside the source rule.
+    pub field_position: usize,
     /// Entry index inside the source rule.
     pub entry_index: usize,
 }
