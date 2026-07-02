@@ -281,7 +281,14 @@ fn validate_padding(reader: &mut BitReader<'_>) -> Result<()> {
 }
 
 fn reconstruct_packet(direction: Direction, fields: &FieldStore) -> Result<Vec<u8>> {
-    let coap = reconstruct_coap(fields)?;
+    let coap = if fields
+        .first_by_field(&FieldRef::Coap("fid-coap-version"))
+        .is_some()
+    {
+        reconstruct_coap(fields)?
+    } else {
+        Vec::new()
+    };
     let udp = reconstruct_udp(direction, fields, &coap)?;
     reconstruct_ipv6(direction, fields, &udp)
 }
@@ -341,7 +348,10 @@ fn reconstruct_udp(direction: Direction, fields: &FieldStore, coap: &[u8]) -> Re
         Direction::Up => (dev_port, app_port),
         Direction::Down => (app_port, dev_port),
     };
-    let udp_length = u16::try_from(8 + coap.len()).map_err(|_| {
+    let payload = fields
+        .first_by_field(&FieldRef::Udp("fid-udp-payload"))
+        .map_or_else(|| coap.to_vec(), |value| value.bytes().to_vec());
+    let udp_length = u16::try_from(8 + payload.len()).map_err(|_| {
         SchcError::InvalidResidue("UDP payload is too large to encode length".to_owned())
     })?;
 
@@ -350,7 +360,7 @@ fn reconstruct_udp(direction: Direction, fields: &FieldStore, coap: &[u8]) -> Re
     output.extend_from_slice(&destination_port.to_be_bytes());
     output.extend_from_slice(&udp_length.to_be_bytes());
     output.extend_from_slice(&0_u16.to_be_bytes());
-    output.extend_from_slice(coap);
+    output.extend_from_slice(&payload);
     Ok(output)
 }
 

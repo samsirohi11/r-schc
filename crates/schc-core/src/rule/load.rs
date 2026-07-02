@@ -1025,6 +1025,7 @@ fn field_ref(identifier: &str, sid: u64) -> FieldRef {
         "fid-udp-app-port" => FieldRef::Udp("fid-udp-app-port"),
         "fid-udp-length" => FieldRef::Udp("fid-udp-length"),
         "fid-udp-checksum" => FieldRef::Udp("fid-udp-checksum"),
+        "fid-udp-payload" => FieldRef::Udp("fid-udp-payload"),
         "fid-coap-version" => FieldRef::Coap("fid-coap-version"),
         "fid-coap-type" => FieldRef::Coap("fid-coap-type"),
         "fid-coap-tkl" => FieldRef::Coap("fid-coap-tkl"),

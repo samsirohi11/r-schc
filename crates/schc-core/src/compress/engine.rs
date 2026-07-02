@@ -4,7 +4,7 @@ use crate::bit::{BitReader, BitWriter};
 use crate::error::{Result, SchcError};
 use crate::packet::{
     field::{FieldKey, FieldStore, FieldValue},
-    length::LengthResolver,
+    length::{write_variable_length_prefix, LengthResolver},
     Ipv6Packet, UdpDatagram,
 };
 use crate::rule::{Cda, Direction, FieldLength, FieldRef, MatchingOperator, RuleContext};
@@ -250,6 +250,20 @@ fn write_residue(
     match branch.action {
         Cda::NotSent | Cda::Compute => Ok(()),
         Cda::ValueSent => {
+            match &branch.parse.length {
+                FieldLength::VariableBytes => {
+                    if field.bit_len() % 8 != 0 {
+                        return Err(SchcError::InvalidResidue(
+                            "variable byte field is not byte aligned".to_owned(),
+                        ));
+                    }
+                    write_variable_length_prefix(writer, field.bytes().len())?;
+                }
+                FieldLength::VariableBits => {
+                    write_variable_length_prefix(writer, field.bit_len())?;
+                }
+                _ => {}
+            }
             if field.bit_len() == 0 {
                 return Ok(());
             }
@@ -470,6 +484,7 @@ fn extract_udp_field(udp: &[u8], direction: Direction, name: &str) -> Result<Fie
         "fid-udp-checksum" => {
             FieldValue::from_u64(u64::from(u16::from_be_bytes([udp[6], udp[7]])), 16)
         }
+        "fid-udp-payload" => FieldValue::from_bytes(udp[8..].to_vec(), (udp.len() - 8) * 8),
         _ => Err(packet_error(
             "compression",
             format!("unsupported UDP field {name}"),
