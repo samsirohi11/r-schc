@@ -10,6 +10,24 @@ pub struct CoapOption {
 }
 
 impl CoapOption {
+    /// Creates a CoAP option from an absolute option number and value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::Packet`] when the option value length exceeds the
+    /// encodable CoAP range.
+    pub fn new(number: u32, value: Vec<u8>) -> Result<Self> {
+        let length = u32::try_from(value.len())
+            .map_err(|_| packet_error("CoAP", "option length does not fit u32"))?;
+        if length > 65_804 {
+            return Err(packet_error(
+                "CoAP",
+                "option length exceeds encodable range",
+            ));
+        }
+        Ok(Self { number, value })
+    }
+
     /// Returns the cumulative CoAP option number.
     #[must_use]
     pub fn number(&self) -> u32 {
@@ -154,6 +172,57 @@ impl CoapMessage {
     #[must_use]
     pub fn payload(&self) -> &[u8] {
         &self.payload
+    }
+
+    /// Builds a CoAP message from header fields, token, options, and payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::Packet`] when header fields are out of range, the
+    /// token is longer than eight bytes, options are not in nondecreasing
+    /// order, or an option delta exceeds the encodable range.
+    pub fn from_parts(
+        version: u8,
+        message_type: u8,
+        code: u8,
+        message_id: u16,
+        token: Vec<u8>,
+        options: Vec<CoapOption>,
+        payload: Vec<u8>,
+    ) -> Result<Self> {
+        if version > 3 {
+            return Err(packet_error("CoAP", "version exceeds 3"));
+        }
+        if message_type > 3 {
+            return Err(packet_error("CoAP", "message type exceeds 3"));
+        }
+        if token.len() > 8 {
+            return Err(packet_error("CoAP", "token length exceeds 8 bytes"));
+        }
+
+        let mut previous_number = 0u32;
+        for option in &options {
+            if option.number < previous_number {
+                return Err(packet_error(
+                    "CoAP",
+                    "options are not in nondecreasing order",
+                ));
+            }
+            if option.number - previous_number > 65_804 {
+                return Err(packet_error("CoAP", "option delta exceeds encodable range"));
+            }
+            previous_number = option.number;
+        }
+
+        Ok(Self {
+            version,
+            message_type,
+            code,
+            message_id,
+            token,
+            options,
+            payload,
+        })
     }
 
     /// Serializes this message to bytes using canonical option encoding.

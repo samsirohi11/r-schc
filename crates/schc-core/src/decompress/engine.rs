@@ -6,6 +6,7 @@ use crate::packet::{
     checksum::transport_checksum,
     field::{FieldKey, FieldStore, FieldValue},
     length::{read_variable_length_prefix, LengthResolver},
+    CoapMessage, CoapOption,
 };
 use crate::rule::{
     Cda, Direction, FieldLength, FieldRef, FieldRule, MatchingOperator, Position, Rule,
@@ -115,10 +116,23 @@ fn decode_field_len(
     lengths: &LengthResolver,
     fields: &FieldStore,
 ) -> Result<usize> {
-    match &field.length {
-        FieldLength::VariableBytes => Ok(read_variable_length_prefix(reader)? * 8),
-        FieldLength::VariableBits => read_variable_length_prefix(reader),
-        length => lengths.resolve(length, fields),
+    match (&field.length, field.action) {
+        (FieldLength::VariableBytes | FieldLength::VariableBits, Cda::NotSent) => {
+            not_sent_target_bit_len(field)
+        }
+        (FieldLength::VariableBytes, _) => Ok(read_variable_length_prefix(reader)? * 8),
+        (FieldLength::VariableBits, _) => read_variable_length_prefix(reader),
+        (length, _) => lengths.resolve(length, fields),
+    }
+}
+
+fn not_sent_target_bit_len(field: &FieldRule) -> Result<usize> {
+    match &field.target {
+        TargetValue::Bytes(bytes) => Ok(bytes.len() * 8),
+        _ => Err(SchcError::InvalidResidue(format!(
+            "not-sent field {:?} requires a byte target",
+            field.field
+        ))),
     }
 }
 
@@ -322,11 +336,11 @@ fn reconstruct_coap(fields: &FieldStore) -> Result<Vec<u8>> {
                     "CoAP token length does not match TKL".to_owned(),
                 ));
             }
-            Ok(value.bytes())
+            Ok(value.bytes().to_vec())
         })
         .transpose()?;
     let token = match (token_len, token) {
-        (0, None) => &[][..],
+        (0, None) => Vec::new(),
         (0, Some(value)) if value.is_empty() => value,
         (0, Some(_)) => {
             return Err(SchcError::InvalidResidue(
@@ -341,12 +355,28 @@ fn reconstruct_coap(fields: &FieldStore) -> Result<Vec<u8>> {
         }
     };
 
-    let mut output = Vec::with_capacity(4 + token.len());
-    output.push((version << 6) | (message_type << 4) | token_len);
-    output.push(code);
-    output.extend_from_slice(&message_id.to_be_bytes());
-    output.extend_from_slice(token);
-    Ok(output)
+    let mut options = Vec::new();
+    for (key, value) in fields.iter() {
+        if let FieldRef::CoapOption { number } = key.field() {
+            options.push(CoapOption::new(u32::from(*number), value.bytes().to_vec())?);
+        }
+    }
+
+    let payload = fields
+        .first_by_field(&FieldRef::Coap("fid-coap-payload"))
+        .map(|value| value.bytes().to_vec())
+        .unwrap_or_default();
+
+    let message = CoapMessage::from_parts(
+        version,
+        message_type,
+        code,
+        message_id,
+        token,
+        options,
+        payload,
+    )?;
+    Ok(message.to_vec())
 }
 
 fn reconstruct_udp(direction: Direction, fields: &FieldStore, coap: &[u8]) -> Result<Vec<u8>> {

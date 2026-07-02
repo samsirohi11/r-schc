@@ -130,7 +130,13 @@ impl Compressor {
                 FieldLength::VariableBytes | FieldLength::VariableBits => None,
                 length => Some(state.lengths.resolve(length, &state.fields)?),
             };
-            let field = extract_field(packet, direction, &branch.parse, bit_len)?;
+            let field = extract_field(
+                packet,
+                direction,
+                &branch.parse,
+                bit_len,
+                state.coap_option_index,
+            )?;
             let Some(match_result) = matches_branch(&field, &branch)? else {
                 continue;
             };
@@ -151,6 +157,9 @@ impl Compressor {
                 ),
                 field,
             );
+            if matches!(branch.parse.field, FieldRef::CoapOption { .. }) {
+                next_state.coap_option_index += 1;
+            }
             self.traverse(branch.next, direction, packet, &next_state, candidates)?;
         }
 
@@ -163,7 +172,6 @@ struct CompressionState {
     residue: BitWriter,
     fields: FieldStore,
     lengths: LengthResolver,
-    #[allow(dead_code)]
     coap_option_index: usize,
     #[allow(dead_code)]
     residual_tail: Vec<u8>,
@@ -389,6 +397,7 @@ fn extract_field(
     direction: Direction,
     parse: &ParseStep,
     bit_len: Option<usize>,
+    coap_option_index: usize,
 ) -> Result<FieldValue> {
     match &parse.field {
         FieldRef::Ipv6(name) => extract_ipv6_field(packet, direction, name),
@@ -402,13 +411,21 @@ fn extract_field(
             let udp = UdpDatagram::parse(ipv6.payload())?;
             extract_coap_field(udp.payload(), name, bit_len)
         }
+        FieldRef::CoapOption { number } => {
+            let ipv6 = Ipv6Packet::parse(packet)?;
+            let udp = UdpDatagram::parse(ipv6.payload())?;
+            let coap = crate::packet::CoapMessage::parse(udp.payload())?;
+            let option = coap
+                .options()
+                .iter()
+                .skip(coap_option_index)
+                .find(|candidate| candidate.number() == u32::from(*number))
+                .ok_or(SchcError::NoMatchingRule)?;
+            FieldValue::from_bytes(option.value().to_vec(), option.value().len() * 8)
+        }
         FieldRef::Icmpv6(name) => Err(packet_error(
             "compression",
             format!("unsupported ICMPv6 field {name}"),
-        )),
-        FieldRef::CoapOption { number } => Err(packet_error(
-            "compression",
-            format!("unsupported CoAP option field {number}"),
         )),
         FieldRef::SyntheticCoapMarker => Err(packet_error(
             "compression",
@@ -517,6 +534,10 @@ fn extract_coap_field(coap: &[u8], name: &str, bit_len: Option<usize>) -> Result
                 return Err(packet_error("CoAP", "token length exceeds 8 bytes"));
             }
             bytes_as_value(&coap[4..4 + token_len], token_len * 8)
+        }
+        "fid-coap-payload" => {
+            let parsed = crate::packet::CoapMessage::parse(coap)?;
+            FieldValue::from_bytes(parsed.payload().to_vec(), parsed.payload().len() * 8)
         }
         _ => Err(packet_error(
             "compression",

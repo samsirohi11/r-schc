@@ -85,6 +85,43 @@ fn dynamic_token_context() -> RuleContext {
     RuleContext::from_json_str(json, registry).unwrap()
 }
 
+fn coap_options_context() -> RuleContext {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 4,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-trafficclass", "length_bits": 8, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-flowlabel", "length_bits": 20, "direction": "bi", "target": "000000", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-payload-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+          { "field": "fid-ipv6-nextheader", "length_bits": 8, "direction": "bi", "target": "11", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "value-sent" },
+          { "field": "fid-ipv6-devprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-deviid", "length_bits": 64, "direction": "bi", "target": "0000000000000001", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-appprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-appiid", "length_bits": 64, "direction": "bi", "target": "0000000000000002", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-udp-dev-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-udp-app-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-udp-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+          { "field": "fid-udp-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+          { "field": "fid-coap-version", "length_bits": 2, "direction": "bi", "target": "01", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-coap-type", "length_bits": 2, "direction": "bi", "target": "00", "mo": "ignore", "cda": "value-sent" },
+          { "field": "fid-coap-tkl", "length_bits": 4, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
+          { "field": "fid-coap-code", "length_bits": 8, "direction": "bi", "target": "02", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-coap-mid", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
+          { "field": "fid-coap-token", "length": { "type": "token-length" }, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
+          { "field": "fid-coap-option-uri-path", "length": { "type": "variable", "unit": "bytes" }, "direction": "up", "target": "74656d70", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-coap-payload", "length": { "type": "variable", "unit": "bytes" }, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
+        ]
+      }]
+    }
+    "#;
+    RuleContext::from_json_str(json, registry).unwrap()
+}
+
 fn coap_token_packet() -> Vec<u8> {
     hex::decode(
         "60000000000e114020010db8000000000000000000000001\
@@ -99,6 +136,15 @@ fn udp_payload_packet() -> Vec<u8> {
         "60000000000d114020010db8000000000000000000000001\
          20010db800000000000000000000000216331633000d3427\
          68656c6c6f",
+    )
+    .unwrap()
+}
+
+fn coap_path_payload_packet() -> Vec<u8> {
+    hex::decode(
+        "600000000018114020010db8000000000000000000000001\
+         20010db80000000000000000000000021633163300188da9\
+         42021234aabbb474656d70ff32312e35",
     )
     .unwrap()
 }
@@ -172,6 +218,23 @@ fn udp_payload_residue_round_trips_when_rule_has_payload_field() {
     "#;
     let context = RuleContext::from_json_str(json, registry).unwrap();
     let packet = udp_payload_packet();
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+
+    assert_eq!(restored, packet);
+}
+
+#[test]
+fn coap_options_and_payload_round_trip_with_variable_lengths() {
+    let context = coap_options_context();
+    let packet = coap_path_payload_packet();
 
     let compressed = Compressor::new(context.clone())
         .unwrap()

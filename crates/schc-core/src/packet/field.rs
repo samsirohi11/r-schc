@@ -75,6 +75,11 @@ impl FieldStore {
             .iter()
             .find_map(|(key, value)| (key.field() == field).then_some(value))
     }
+
+    /// Iterates over all stored fields in insertion (rule entry) order.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&FieldKey, &FieldValue)> {
+        self.values.iter().map(|(key, value)| (key, value))
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

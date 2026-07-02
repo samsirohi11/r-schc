@@ -1,4 +1,4 @@
-use schc_core::packet::{CoapMessage, Icmpv6Message, Ipv6Packet, UdpDatagram};
+use schc_core::packet::{CoapMessage, CoapOption, Icmpv6Message, Ipv6Packet, UdpDatagram};
 
 #[test]
 fn ipv6_udp_coap_packet_round_trips() {
@@ -80,4 +80,23 @@ fn icmpv6_rejects_truncated_messages_and_preserves_bytes() {
     assert_eq!(icmp.checksum(), 0x1234);
     assert_eq!(icmp.payload(), &[0xab, 0xcd]);
     assert_eq!(icmp.to_vec(), message);
+}
+
+#[test]
+fn coap_message_builds_token_options_and_payload() {
+    let message = CoapMessage::from_parts(
+        1,
+        0,
+        2,
+        0x1234,
+        b"\xaa\xbb".to_vec(),
+        vec![CoapOption::new(11, b"temp".to_vec()).unwrap()],
+        b"21.5".to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        message.to_vec(),
+        hex::decode("42021234aabbb474656d70ff32312e35").unwrap()
+    );
 }
