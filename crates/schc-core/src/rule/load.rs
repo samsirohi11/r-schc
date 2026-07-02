@@ -203,6 +203,28 @@ fn validate_rule_id(rule_index: usize, rule_id: u64, rule_id_length: usize) -> R
     Ok(())
 }
 
+/// Validates that a field rule's CDA and matching operator are consistent.
+///
+/// - `mapping-sent` requires a `TargetValue::Mapping` target.
+/// - `lsb` requires an `Msb(_)` matching operator.
+fn validate_field_rule(rule_index: usize, field: &FieldRule) -> Result<()> {
+    if field.action == Cda::MappingSent && !matches!(field.target, TargetValue::Mapping(_)) {
+        return Err(invalid_field(
+            rule_index,
+            field.entry_index,
+            "mapping-sent requires a mapping target".to_owned(),
+        ));
+    }
+    if field.action == Cda::Lsb && !matches!(field.matching, MatchingOperator::Msb(_)) {
+        return Err(invalid_field(
+            rule_index,
+            field.entry_index,
+            "lsb requires an msb matching operator".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn load_field(
     sid_registry: &SidRegistry,
     rule_index: usize,
@@ -217,7 +239,7 @@ fn load_field(
         &json_field.field,
     )?;
 
-    Ok(FieldRule {
+    let rule = FieldRule {
         field: field_ref(&json_field.field, field_sid),
         length: json_field_length(rule_index, entry_index, &json_field)?,
         field_position: json_field.field_position,
@@ -231,7 +253,9 @@ fn load_field(
         matching: matching_operator(sid_registry, rule_index, entry_index, &json_field.mo)?,
         action: cda(sid_registry, rule_index, entry_index, &json_field.cda)?,
         entry_index,
-    })
+    };
+    validate_field_rule(rule_index, &rule)?;
+    Ok(rule)
 }
 
 fn json_field_length(
@@ -339,7 +363,7 @@ fn load_cbor_normal_field(
         required_field_u64(value, 15, rule_index, entry_order)?,
     )?;
 
-    Ok(FieldRule {
+    let rule = FieldRule {
         field: field_ref(&field_identifier, field_sid),
         length,
         field_position,
@@ -348,7 +372,9 @@ fn load_cbor_normal_field(
         matching,
         action,
         entry_index,
-    })
+    };
+    validate_field_rule(rule_index, &rule)?;
+    Ok(rule)
 }
 
 fn load_cbor_universal_option_field(
@@ -393,7 +419,7 @@ fn load_cbor_universal_option_field(
         required_field_u64(value, -16, rule_index, entry_order)?,
     )?;
 
-    Ok(FieldRule {
+    let rule = FieldRule {
         field: FieldRef::CoapOption {
             number: option_number,
         },
@@ -404,7 +430,9 @@ fn load_cbor_universal_option_field(
         matching,
         action,
         entry_index,
-    })
+    };
+    validate_field_rule(rule_index, &rule)?;
+    Ok(rule)
 }
 
 fn cbor_field_length(

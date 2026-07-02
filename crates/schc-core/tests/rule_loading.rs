@@ -396,3 +396,45 @@ fn tagged(tag: u64, value: ciborium::value::Value) -> ciborium::value::Value {
 fn int(value: i128) -> ciborium::value::Value {
     ciborium::value::Value::Integer(value.try_into().unwrap())
 }
+
+#[test]
+fn json_rule_rejects_mapping_sent_without_mapping_target() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "mapping-sent" }
+        ]
+      }]
+    }
+    "#;
+
+    assert!(matches!(
+        RuleContext::from_json_str(json, registry),
+        Err(SchcError::InvalidRuleField { .. })
+    ));
+}
+
+#[test]
+fn json_rule_rejects_lsb_without_msb() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "lsb" }
+        ]
+      }]
+    }
+    "#;
+
+    assert!(matches!(
+        RuleContext::from_json_str(json, registry),
+        Err(SchcError::InvalidRuleField { .. })
+    ));
+}

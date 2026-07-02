@@ -368,3 +368,37 @@ fn golden_coap_get_round_trip_matches_fixtures() {
     let restored = decompressor.decompress(Position::Core, &expected).unwrap();
     assert_eq!(restored, packet);
 }
+
+#[test]
+fn decompressor_rejects_mapping_index_out_of_range() {
+    let context = context();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    let error = decompressor
+        .decompress(Position::Core, &[0xff, 0xff])
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SchcError::NoMatchingRule | SchcError::InvalidResidue(_)
+    ));
+}
+
+#[test]
+fn decompressor_rejects_full_byte_trailing_residue_without_payload_field() {
+    let context = context();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    let mut compressed = compressor()
+        .compress(Direction::Up, &coap_get_packet())
+        .unwrap()
+        .bytes()
+        .to_vec();
+    compressed.push(0xaa);
+
+    let error = decompressor
+        .decompress(Position::Core, &compressed)
+        .unwrap_err();
+
+    assert!(matches!(error, SchcError::InvalidResidue(_)));
+}
