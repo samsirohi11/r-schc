@@ -18,8 +18,6 @@ pub enum Position {
     Device,
     /// Core-network position.
     Core,
-    /// Application-side position.
-    App,
 }
 
 /// Direction selector attached to a field rule entry.
@@ -163,6 +161,49 @@ pub enum Cda {
     Compute,
 }
 
+/// Nature of a SCHC rule.
+///
+/// Matches the `nature-*` identities from the SCHC data model. Existing rules
+/// default to [`RuleNature::Compression`]. Fragmentation is explicitly
+/// unsupported by the core, and no-compression rules are representable but not
+/// processed by the compressor or decompressor.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum RuleNature {
+    /// Compression rule.
+    Compression,
+    /// No-compression rule.
+    NoCompression,
+    /// Fragmentation rule.
+    Fragmentation,
+}
+
+impl RuleNature {
+    /// Returns the stable lowercase identifier used by the JSON loader.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Compression => "compression",
+            Self::NoCompression => "no-compression",
+            Self::Fragmentation => "fragmentation",
+        }
+    }
+
+    /// Parses a lowercase nature identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` when `value` is not a recognized nature identifier.
+    #[must_use]
+    pub fn parse_identifier(value: &str) -> Option<Self> {
+        match value {
+            "compression" => Some(Self::Compression),
+            "no-compression" => Some(Self::NoCompression),
+            "fragmentation" => Some(Self::Fragmentation),
+            _ => None,
+        }
+    }
+}
+
 /// One field rule entry inside a SCHC rule.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FieldRule {
@@ -189,13 +230,24 @@ pub struct FieldRule {
 pub struct Rule {
     id: RuleId,
     fields: Vec<FieldRule>,
+    nature: RuleNature,
 }
 
 impl Rule {
-    /// Creates a rule from an identifier and ordered field entries.
+    /// Creates a compression rule from an identifier and ordered field entries.
     #[must_use]
     pub fn new(id: RuleId, fields: Vec<FieldRule>) -> Self {
-        Self { id, fields }
+        Self {
+            id,
+            fields,
+            nature: RuleNature::Compression,
+        }
+    }
+
+    /// Creates a rule with an explicit nature.
+    #[must_use]
+    pub fn new_with_nature(id: RuleId, fields: Vec<FieldRule>, nature: RuleNature) -> Self {
+        Self { id, fields, nature }
     }
 
     /// Returns this rule's identifier.
@@ -208,6 +260,12 @@ impl Rule {
     #[must_use]
     pub fn fields(&self) -> &[FieldRule] {
         &self.fields
+    }
+
+    /// Returns this rule's nature.
+    #[must_use]
+    pub const fn nature(&self) -> RuleNature {
+        self.nature
     }
 }
 

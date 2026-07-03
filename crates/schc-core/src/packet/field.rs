@@ -31,6 +31,11 @@ impl FieldKey {
     pub(crate) const fn entry_index(&self) -> usize {
         self.entry_index
     }
+
+    #[allow(dead_code)]
+    pub(crate) const fn field_position(&self) -> usize {
+        self.field_position
+    }
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -74,6 +79,20 @@ impl FieldStore {
         self.values
             .iter()
             .find_map(|(key, value)| (key.field() == field).then_some(value))
+    }
+
+    /// Returns the first stored value for `field` at a specific field position.
+    ///
+    /// Used to distinguish an outer packet field (position 1) from an
+    /// ICMPv6-embedded inner packet field (position 2).
+    pub(crate) fn first_by_field_position(
+        &self,
+        field: &FieldRef,
+        position: usize,
+    ) -> Option<&FieldValue> {
+        self.values.iter().find_map(|(key, value)| {
+            (key.field() == field && key.field_position() == position).then_some(value)
+        })
     }
 
     /// Iterates over all stored fields in insertion (rule entry) order.

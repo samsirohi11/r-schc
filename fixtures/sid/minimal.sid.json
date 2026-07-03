@@ -47,7 +47,11 @@
       { "namespace": "identity", "identifier": "fl-length-bytes", "sid": 5001 },
       { "namespace": "identity", "identifier": "fl-token-length", "sid": 5002 },
       { "namespace": "identity", "identifier": "fl-variable", "sid": 5003 },
-      { "namespace": "identity", "identifier": "fl-variable-bits", "sid": 5004 }
+      { "namespace": "identity", "identifier": "fl-variable-bits", "sid": 5004 },
+      { "namespace": "identity", "identifier": "nature-compression", "sid": 2940 },
+      { "namespace": "identity", "identifier": "nature-no-compression", "sid": 2941 },
+      { "namespace": "identity", "identifier": "nature-fragmentation", "sid": 2942 },
+      { "namespace": "identity", "identifier": "nature-management", "sid": 2943 }
     ]
   }
 }

@@ -83,6 +83,13 @@ pub enum SchcError {
     #[error("no matching rule")]
     NoMatchingRule,
 
+    /// A rule nature is not supported by the requested operation.
+    #[error("unsupported rule nature: {nature}")]
+    UnsupportedRuleNature {
+        /// Human-readable nature identifier.
+        nature: &'static str,
+    },
+
     /// A residue or mapping value is invalid.
     #[error("invalid residue: {0}")]
     InvalidResidue(String),

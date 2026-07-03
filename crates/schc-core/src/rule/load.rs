@@ -8,7 +8,7 @@ use serde::Deserialize;
 use crate::error::{Result, SchcError};
 use crate::rule::model::{
     Cda, DirectionSelector, FieldLength, FieldRef, FieldRule, LengthUnit, MatchingOperator, Rule,
-    RuleId, RuleSet, TargetValue,
+    RuleId, RuleNature, RuleSet, TargetValue,
 };
 use crate::SidRegistry;
 
@@ -27,6 +27,8 @@ struct RuleFile {
 struct JsonRule {
     rule_id: u64,
     rule_id_length: usize,
+    #[serde(default)]
+    nature: Option<String>,
     fields: Vec<JsonField>,
 }
 
@@ -118,9 +120,11 @@ impl RuleContext {
                 )?);
             }
 
-            rules.push(Rule::new(
+            let nature = parse_nature(rule_index, json_rule.nature.as_deref())?;
+            rules.push(Rule::new_with_nature(
                 RuleId::new(json_rule.rule_id, json_rule.rule_id_length),
                 fields,
+                nature,
             ));
         }
 
@@ -156,6 +160,7 @@ impl RuleContext {
                 reason: format!("invalid rule ID value key 2: {reason}"),
             })?;
             validate_rule_id(rule_index, rule_id, rule_id_length)?;
+            let nature = cbor_rule_nature(&sid_registry, rule_index, rule_value)?;
 
             let entry_values =
                 required_array(rule_value, 23).map_err(|reason| SchcError::InvalidRule {
@@ -172,7 +177,11 @@ impl RuleContext {
                 )?);
             }
 
-            rules.push(Rule::new(RuleId::new(rule_id, rule_id_length), fields));
+            rules.push(Rule::new_with_nature(
+                RuleId::new(rule_id, rule_id_length),
+                fields,
+                nature,
+            ));
         }
 
         Ok(Self {
@@ -203,10 +212,65 @@ fn validate_rule_id(rule_index: usize, rule_id: u64, rule_id_length: usize) -> R
     Ok(())
 }
 
+/// Parses an optional JSON nature identifier, defaulting to compression.
+fn parse_nature(rule_index: usize, nature: Option<&str>) -> Result<RuleNature> {
+    match nature {
+        None => Ok(RuleNature::Compression),
+        Some(value) => RuleNature::parse_identifier(value).ok_or_else(|| SchcError::InvalidRule {
+            rule_index,
+            reason: format!("unknown rule nature {value}"),
+        }),
+    }
+}
+
+/// Resolves the CBOR rule nature (key 3), defaulting to compression when absent.
+///
+/// A nature value of `0` is treated as the default (compression), matching the
+/// H-SCHC `rule_data.get(3, 0)` convention.
+fn cbor_rule_nature(
+    sid_registry: &SidRegistry,
+    rule_index: usize,
+    rule_value: &Value,
+) -> Result<RuleNature> {
+    let Some(nature_value) = map_value(rule_value, 3) else {
+        return Ok(RuleNature::Compression);
+    };
+    let sid = value_to_u64(nature_value).map_err(|reason| SchcError::InvalidRule {
+        rule_index,
+        reason: format!("invalid rule nature key 3: {reason}"),
+    })?;
+    if sid == 0 {
+        return Ok(RuleNature::Compression);
+    }
+    let identifier = sid_identifier(sid_registry, rule_index, 0, "nature", sid)?;
+    match identifier.as_str() {
+        "nature-compression" => Ok(RuleNature::Compression),
+        "nature-no-compression" => Ok(RuleNature::NoCompression),
+        "nature-fragmentation" => Ok(RuleNature::Fragmentation),
+        other => Err(SchcError::InvalidRule {
+            rule_index,
+            reason: format!("unsupported rule nature SID {sid} identifier {other}"),
+        }),
+    }
+}
+
+/// Returns true when `field` is a field identity the core can compute.
+fn is_compute_supported(field: &FieldRef) -> bool {
+    matches!(
+        field,
+        FieldRef::Ipv6("fid-ipv6-payload-length")
+            | FieldRef::Udp("fid-udp-length" | "fid-udp-checksum")
+            | FieldRef::Icmpv6("fid-icmpv6-checksum")
+    )
+}
+
 /// Validates that a field rule's CDA and matching operator are consistent.
 ///
 /// - `mapping-sent` requires a `TargetValue::Mapping` target.
 /// - `lsb` requires an `Msb(_)` matching operator.
+/// - `compute` is only allowed for field identities the core can compute
+///   (length or transport checksum fields).
+/// - the CoAP payload marker sentinel must use `not-sent` with `ignore`.
 fn validate_field_rule(rule_index: usize, field: &FieldRule) -> Result<()> {
     if field.action == Cda::MappingSent && !matches!(field.target, TargetValue::Mapping(_)) {
         return Err(invalid_field(
@@ -222,6 +286,25 @@ fn validate_field_rule(rule_index: usize, field: &FieldRule) -> Result<()> {
             "lsb requires an msb matching operator".to_owned(),
         ));
     }
+    if field.action == Cda::Compute && !is_compute_supported(&field.field) {
+        return Err(invalid_field(
+            rule_index,
+            field.entry_index,
+            format!(
+                "compute is not supported for field {:?}; only length and checksum fields can be computed",
+                field.field
+            ),
+        ));
+    }
+    if matches!(field.field, FieldRef::SyntheticCoapMarker)
+        && (field.action != Cda::NotSent || field.matching != MatchingOperator::Ignore)
+    {
+        return Err(invalid_field(
+            rule_index,
+            field.entry_index,
+            "CoAP payload marker must use not-sent with ignore".to_owned(),
+        ));
+    }
     Ok(())
 }
 
@@ -231,16 +314,21 @@ fn load_field(
     entry_index: usize,
     json_field: JsonField,
 ) -> Result<FieldRule> {
-    let field_sid = validate_field_identifier(
-        sid_registry,
-        rule_index,
-        entry_index,
-        "field",
-        &json_field.field,
-    )?;
+    let field = if let Some(number) = parse_coap_option_field(&json_field.field) {
+        FieldRef::CoapOption { number }
+    } else {
+        let field_sid = validate_field_identifier(
+            sid_registry,
+            rule_index,
+            entry_index,
+            "field",
+            &json_field.field,
+        )?;
+        field_ref(&json_field.field, field_sid)
+    };
 
     let rule = FieldRule {
-        field: field_ref(&json_field.field, field_sid),
+        field,
         length: json_field_length(rule_index, entry_index, &json_field)?,
         field_position: json_field.field_position,
         direction: direction_selector(
@@ -256,6 +344,16 @@ fn load_field(
     };
     validate_field_rule(rule_index, &rule)?;
     Ok(rule)
+}
+
+/// Parses a `coap-option(<number>)` JSON field identifier.
+///
+/// Returns the option number when `value` matches the universal option-by-number
+/// form, which does not require a per-option SID registry entry.
+fn parse_coap_option_field(value: &str) -> Option<u16> {
+    let inner = value.strip_prefix("coap-option(")?.strip_suffix(')')?;
+    let number = inner.parse::<u16>().ok()?;
+    Some(number)
 }
 
 fn json_field_length(
@@ -1061,6 +1159,7 @@ fn field_ref(identifier: &str, sid: u64) -> FieldRef {
         "fid-coap-mid" => FieldRef::Coap("fid-coap-mid"),
         "fid-coap-token" => FieldRef::Coap("fid-coap-token"),
         "fid-coap-payload" => FieldRef::Coap("fid-coap-payload"),
+        "fid-coap-payload-marker" => FieldRef::SyntheticCoapMarker,
         "fid-coap-option-uri-host" => FieldRef::CoapOption { number: 3 },
         "fid-coap-option-uri-path" => FieldRef::CoapOption { number: 11 },
         "fid-icmpv6-type" => FieldRef::Icmpv6("fid-icmpv6-type"),

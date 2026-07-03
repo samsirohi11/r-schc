@@ -7,7 +7,9 @@ use crate::packet::{
     length::{write_variable_length_prefix, LengthResolver},
     Ipv6Packet, UdpDatagram,
 };
-use crate::rule::{Cda, Direction, FieldLength, FieldRef, MatchingOperator, RuleContext};
+use crate::rule::{
+    Cda, Direction, FieldLength, FieldRef, MatchingOperator, Rule, RuleContext, RuleNature,
+};
 use crate::tree::{Branch, DecisionTree, ParseStep};
 use crate::TargetValue;
 
@@ -67,24 +69,47 @@ impl Compressor {
 
     /// Compresses one IPv6 packet.
     ///
+    /// Rules whose nature is not [`RuleNature::Compression`] are not processed:
+    /// reaching a no-compression or fragmentation leaf returns a clear
+    /// [`SchcError::UnsupportedRuleNature`] instead of silently compressing.
+    ///
     /// # Errors
     ///
     /// Returns [`SchcError::Packet`] when packet parsing fails.
     /// Returns [`SchcError::NoMatchingRule`] when no rule path matches.
+    /// Returns [`SchcError::UnsupportedRuleNature`] when the only matching rule
+    /// is a no-compression or fragmentation rule.
     /// Returns [`SchcError::InvalidResidue`] when residue encoding cannot be
     /// represented.
     pub fn compress(&self, direction: Direction, packet: &[u8]) -> Result<CompressedDatagram> {
         Ipv6Packet::parse(packet)?;
 
         let mut candidates = Vec::new();
+        let mut nature_errors = Vec::new();
         let state = CompressionState::default();
-        self.traverse(0, direction, packet, &state, &mut candidates)?;
+        self.traverse(
+            0,
+            direction,
+            packet,
+            &state,
+            &mut candidates,
+            &mut nature_errors,
+        )?;
 
-        candidates
+        if let Some(candidate) = candidates
             .into_iter()
             .min_by_key(|candidate| (candidate.datagram.bit_len, candidate.rule_order))
-            .map(|candidate| candidate.datagram)
-            .ok_or(SchcError::NoMatchingRule)
+        {
+            return Ok(candidate.datagram);
+        }
+
+        if let Some(nature) = nature_errors.into_iter().next() {
+            return Err(SchcError::UnsupportedRuleNature {
+                nature: nature.as_str(),
+            });
+        }
+
+        Err(SchcError::NoMatchingRule)
     }
 
     /// Returns the decision tree used by this compressor.
@@ -106,23 +131,47 @@ impl Compressor {
         packet: &[u8],
         state: &CompressionState,
         candidates: &mut Vec<Candidate>,
+        nature_errors: &mut Vec<RuleNature>,
     ) -> Result<()> {
         let node = &self.tree.nodes()[node_index];
         if let (Some(rule_id), Some(rule_order)) = (node.rule_id, node.rule_order) {
-            let mut writer = BitWriter::new();
-            writer.write_bits(rule_id.value(), rule_id.bit_len())?;
-            append_bits(&mut writer, &state.residue)?;
-            candidates.push(Candidate {
-                rule_order,
-                datagram: CompressedDatagram {
-                    bytes: writer.to_vec(),
-                    bit_len: writer.bit_len(),
-                },
-            });
+            let nature = self
+                .context
+                .rules()
+                .rules()
+                .get(rule_order)
+                .map_or(RuleNature::Compression, Rule::nature);
+            if nature == RuleNature::Compression {
+                let mut writer = BitWriter::new();
+                writer.write_bits(rule_id.value(), rule_id.bit_len())?;
+                append_bits(&mut writer, &state.residue)?;
+                candidates.push(Candidate {
+                    rule_order,
+                    datagram: CompressedDatagram {
+                        bytes: writer.to_vec(),
+                        bit_len: writer.bit_len(),
+                    },
+                });
+            } else {
+                nature_errors.push(nature);
+            }
         }
 
         for branch in node.branches.clone() {
             if !branch.direction.accepts(direction) {
+                continue;
+            }
+
+            if matches!(branch.parse.field, FieldRef::SyntheticCoapMarker) {
+                let next_state = state.clone();
+                self.traverse(
+                    branch.next,
+                    direction,
+                    packet,
+                    &next_state,
+                    candidates,
+                    nature_errors,
+                )?;
                 continue;
             }
 
@@ -160,7 +209,14 @@ impl Compressor {
             if matches!(branch.parse.field, FieldRef::CoapOption { .. }) {
                 next_state.coap_option_index += 1;
             }
-            self.traverse(branch.next, direction, packet, &next_state, candidates)?;
+            self.traverse(
+                branch.next,
+                direction,
+                packet,
+                &next_state,
+                candidates,
+                nature_errors,
+            )?;
         }
 
         Ok(())
@@ -399,6 +455,9 @@ fn extract_field(
     bit_len: Option<usize>,
     coap_option_index: usize,
 ) -> Result<FieldValue> {
+    if parse.field_position >= 2 && is_inner_embedded_field(&parse.field) {
+        return extract_embedded_field(packet, direction, parse);
+    }
     match &parse.field {
         FieldRef::Ipv6(name) => extract_ipv6_field(packet, direction, name),
         FieldRef::Udp(name) => {
@@ -433,6 +492,71 @@ fn extract_field(
             "unsupported synthetic CoAP marker field",
         )),
         FieldRef::UnknownSid(sid) => Err(SchcError::UnknownSid { sid: *sid }),
+    }
+}
+
+/// Returns true when `field` may belong to an ICMPv6-embedded inner packet.
+fn is_inner_embedded_field(field: &FieldRef) -> bool {
+    matches!(field, FieldRef::Ipv6(_) | FieldRef::Udp(_))
+}
+
+/// Reverses a packet direction.
+fn reverse_direction(direction: Direction) -> Direction {
+    match direction {
+        Direction::Up => Direction::Down,
+        Direction::Down => Direction::Up,
+    }
+}
+
+/// Returns true when `message_type` is an `ICMPv6` error type that embeds a copy
+/// of the invoking packet.
+fn is_icmpv6_error_type(message_type: u8) -> bool {
+    matches!(message_type, 1..=4)
+}
+
+/// Extracts a field from the packet embedded in an `ICMPv6` error message.
+///
+/// The embedded packet starts after the 8-byte `ICMPv6` error header
+/// (type, code, checksum, 4 unused bytes) and is parsed with the direction
+/// reversed relative to the outer packet, matching H-SCHC behavior.
+fn extract_embedded_field(
+    packet: &[u8],
+    direction: Direction,
+    parse: &ParseStep,
+) -> Result<FieldValue> {
+    let ipv6 = Ipv6Packet::parse(packet)?;
+    if ipv6.next_header() != 58 {
+        return Err(packet_error(
+            "compression",
+            "inner embedded field requires an ICMPv6 next header",
+        ));
+    }
+    let icmp = crate::packet::Icmpv6Message::parse(ipv6.payload())?;
+    if !is_icmpv6_error_type(icmp.message_type()) {
+        return Err(packet_error(
+            "compression",
+            "inner embedded field requires an ICMPv6 error type",
+        ));
+    }
+    if ipv6.payload().len() < 8 {
+        return Err(packet_error(
+            "ICMPv6",
+            "error header is shorter than 8 bytes",
+        ));
+    }
+    let embedded = &ipv6.payload()[8..];
+    let inner_direction = reverse_direction(direction);
+    match &parse.field {
+        FieldRef::Ipv6(name) => extract_ipv6_field(embedded, inner_direction, name),
+        FieldRef::Udp(name) => {
+            let inner_ipv6 = Ipv6Packet::parse(embedded)?;
+            let udp = UdpDatagram::parse(inner_ipv6.payload())?;
+            extract_udp_field(&udp.to_vec(), inner_direction, name)
+        }
+        _ => Err(packet_error(
+            "compression",
+            "unsupported inner embedded field",
+        )),
     }
 }
 

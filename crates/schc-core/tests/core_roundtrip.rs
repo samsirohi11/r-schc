@@ -86,6 +86,13 @@ fn icmpv6_echo_rule_fixture() -> &'static str {
     )
 }
 
+fn coap_option_by_number_rule_fixture() -> &'static str {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/rules/coap_option_by_number.json"
+    )
+}
+
 fn compressor() -> Compressor {
     Compressor::new(context()).unwrap()
 }
@@ -140,6 +147,12 @@ fn coap_options_context() -> RuleContext {
     RuleContext::from_json_str(&json, registry).unwrap()
 }
 
+fn coap_option_by_number_context() -> RuleContext {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = std::fs::read_to_string(coap_option_by_number_rule_fixture()).unwrap();
+    RuleContext::from_json_str(&json, registry).unwrap()
+}
+
 fn udp_payload_context() -> RuleContext {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let json = std::fs::read_to_string(udp_payload_rule_fixture()).unwrap();
@@ -169,6 +182,15 @@ fn coap_path_payload_packet() -> Vec<u8> {
         "600000000018114020010db8000000000000000000000001\
          20010db80000000000000000000000021633163300188da9\
          42021234aabbb474656d70ff32312e35",
+    )
+    .unwrap()
+}
+
+fn coap_option_by_number_packet() -> Vec<u8> {
+    hex::decode(
+        "600000000017114020010db8000000000000000000000001\
+         20010db800000000000000000000000216331633001750a1\
+         42011234aabbb163118eff32312e35",
     )
     .unwrap()
 }
@@ -246,6 +268,49 @@ fn coap_options_and_payload_round_trip_with_variable_lengths() {
     assert_eq!(restored, packet);
 }
 
+#[test]
+fn coap_option_by_number_and_payload_marker_round_trip() {
+    let context = coap_option_by_number_context();
+    let packet = coap_option_by_number_packet();
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+
+    assert_eq!(restored, packet);
+}
+
+#[test]
+fn decompression_honors_sent_udp_checksum() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let mut json = std::fs::read_to_string(udp_payload_rule_fixture()).unwrap();
+    json = json.replace(
+        r#"{ "field": "fid-udp-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" }"#,
+        r#"{ "field": "fid-udp-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }"#,
+    );
+    let context = RuleContext::from_json_str(&json, registry).unwrap();
+    let mut packet = udp_payload_packet();
+    packet[46] = 0x12;
+    packet[47] = 0x34;
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+
+    assert_eq!(&restored[46..48], &[0x12, 0x34]);
+    assert_eq!(restored, packet);
+}
+
 fn icmpv6_context() -> RuleContext {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let json = std::fs::read_to_string(icmpv6_echo_rule_fixture()).unwrap();
@@ -257,6 +322,59 @@ fn icmpv6_echo_packet() -> Vec<u8> {
         "60000000000c3a4020010db8000000000000000000000001\
          20010db80000000000000000000000028000333e12340001\
          70696e67",
+    )
+    .unwrap()
+}
+
+fn icmpv6_error_context() -> RuleContext {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 5,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-trafficclass", "length_bits": 8, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-flowlabel", "length_bits": 20, "direction": "bi", "target": "000000", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-payload-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+          { "field": "fid-ipv6-nextheader", "length_bits": 8, "direction": "bi", "target": "3a", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "ff", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-devprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-deviid", "length_bits": 64, "direction": "bi", "target": "0000000000000001", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-appprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-appiid", "length_bits": 64, "direction": "bi", "target": "0000000000000002", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-icmpv6-type", "length_bits": 8, "direction": "bi", "target": "01", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-icmpv6-code", "length_bits": 8, "direction": "bi", "target": "04", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-icmpv6-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+
+          { "field": "fid-ipv6-version", "length_bits": 4, "field_position": 2, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-trafficclass", "length_bits": 8, "field_position": 2, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-flowlabel", "length_bits": 20, "field_position": 2, "direction": "bi", "target": "000000", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-payload-length", "length_bits": 16, "field_position": 2, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+          { "field": "fid-ipv6-nextheader", "length_bits": 8, "field_position": 2, "direction": "bi", "target": "11", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "field_position": 2, "direction": "bi", "target": "ff", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-devprefix", "length_bits": 64, "field_position": 2, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-deviid", "length_bits": 64, "field_position": 2, "direction": "bi", "target": "0000000000000001", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-appprefix", "length_bits": 64, "field_position": 2, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-ipv6-appiid", "length_bits": 64, "field_position": 2, "direction": "bi", "target": "0000000000000002", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-udp-dev-port", "length_bits": 16, "field_position": 2, "direction": "bi", "target": "1633", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-udp-app-port", "length_bits": 16, "field_position": 2, "direction": "bi", "target": "1633", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-udp-length", "length_bits": 16, "field_position": 2, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+          { "field": "fid-udp-checksum", "length_bits": 16, "field_position": 2, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" }
+        ]
+      }]
+    }
+    "#;
+    RuleContext::from_json_str(json, registry).unwrap()
+}
+
+fn icmpv6_error_packet() -> Vec<u8> {
+    hex::decode(
+        "6000000000383aff20010db8000000000000000000000002\
+         20010db80000000000000000000000010104312600000000\
+         60000000000811ff20010db8000000000000000000000001\
+         20010db80000000000000000000000021633163300087803",
     )
     .unwrap()
 }
@@ -273,6 +391,23 @@ fn icmpv6_echo_round_trip() {
     let restored = Decompressor::new(context)
         .unwrap()
         .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+
+    assert_eq!(restored, packet);
+}
+
+#[test]
+fn icmpv6_error_embedded_packet_round_trip_reverses_inner_direction() {
+    let context = icmpv6_error_context();
+    let packet = icmpv6_error_packet();
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Down, &packet)
+        .unwrap();
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Device, compressed.bytes())
         .unwrap();
 
     assert_eq!(restored, packet);

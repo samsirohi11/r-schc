@@ -1,0 +1,2471 @@
+{
+  "rules": [
+    {
+      "rule_id": 0,
+      "rule_id_length": 5,
+      "nature": "compression",
+      "fields": [
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "11",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-dev-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "1633",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-app-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-checksum",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-coap-version",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-type",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-tkl",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-code",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": [
+            "05",
+            "07",
+            "45"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "fid-coap-mid",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-token",
+          "length": {
+            "type": "token-length"
+          },
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "coap-option(11)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "63",
+            "73"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "8d",
+            "8e"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "up",
+          "target": "8e",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "coap-option(15)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": "643d30",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "coap-option(17)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": "8e",
+          "mo": "equal",
+          "cda": "not-sent"
+        }
+      ]
+    },
+    {
+      "rule_id": 1,
+      "rule_id_length": 5,
+      "nature": "compression",
+      "fields": [
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "11",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-dev-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "1633",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-app-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-checksum",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-coap-version",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-type",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-tkl",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-code",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": [
+            "05",
+            "45"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "fid-coap-mid",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-token",
+          "length": {
+            "type": "token-length"
+          },
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "coap-option(11)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "63"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "8d",
+            "8e"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "up",
+          "target": "8e",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "coap-option(17)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": "8e",
+          "mo": "equal",
+          "cda": "not-sent"
+        }
+      ]
+    },
+    {
+      "rule_id": 2,
+      "rule_id_length": 5,
+      "nature": "compression",
+      "fields": [
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "11",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-dev-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "1633",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-app-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-checksum",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-coap-version",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-type",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-tkl",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-code",
+          "length_bits": 8,
+          "direction": "down",
+          "target": [
+            "07"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "fid-coap-code",
+          "length_bits": 8,
+          "direction": "up",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-mid",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-token",
+          "length": {
+            "type": "token-length"
+          },
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "coap-option(11)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "63"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "8d",
+            "8e"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        }
+      ]
+    },
+    {
+      "rule_id": 3,
+      "rule_id_length": 5,
+      "nature": "compression",
+      "fields": [
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "11",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-dev-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "1633",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-app-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-checksum",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-coap-version",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-type",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": [
+            "00",
+            "01"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "fid-coap-tkl",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-code",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": [
+            "05",
+            "07",
+            "45"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "fid-coap-mid",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-token",
+          "length": {
+            "type": "token-length"
+          },
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "coap-option(6)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "coap-option(11)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "73"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "8d"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "up",
+          "target": [
+            "8e"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(17)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "8e"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        }
+      ]
+    },
+    {
+      "rule_id": 4,
+      "rule_id_length": 5,
+      "nature": "compression",
+      "fields": [
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "11",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-dev-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "1633",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-app-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-checksum",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-coap-version",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-type",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-tkl",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-code",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-mid",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-token",
+          "length": {
+            "type": "token-length"
+          },
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        }
+      ]
+    },
+    {
+      "rule_id": 5,
+      "rule_id_length": 5,
+      "nature": "compression",
+      "fields": [
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "3a",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-icmpv6-type",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-icmpv6-code",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "04",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-icmpv6-checksum",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "field_position": 2,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "11",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "field_position": 2,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "field_position": 2,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-dev-port",
+          "length_bits": 16,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "1633",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-app-port",
+          "length_bits": 16,
+          "field_position": 2,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-length",
+          "length_bits": 16,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-checksum",
+          "length_bits": 16,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-payload",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "field_position": 2,
+          "direction": "bi",
+          "target": "",
+          "mo": "ignore",
+          "cda": "not-sent"
+        }
+      ]
+    },
+    {
+      "rule_id": 10,
+      "rule_id_length": 5,
+      "nature": "compression",
+      "fields": [
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "11",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "200141d003022200",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "00000000000013b3",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-dev-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "1633",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-app-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-checksum",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-coap-version",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-type",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-tkl",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-code",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": [
+            "05",
+            "07",
+            "45"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "fid-coap-mid",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-token",
+          "length": {
+            "type": "token-length"
+          },
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "coap-option(11)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "63",
+            "73"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "8d",
+            "8e"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "up",
+          "target": "8e",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "coap-option(15)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": "643d30",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "coap-option(17)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": "8e",
+          "mo": "equal",
+          "cda": "not-sent"
+        }
+      ]
+    },
+    {
+      "rule_id": 11,
+      "rule_id_length": 5,
+      "nature": "compression",
+      "fields": [
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "11",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "200141d003022200",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "00000000000013b3",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-dev-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "1633",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-app-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-checksum",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-coap-version",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-type",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-tkl",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-code",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": [
+            "05",
+            "45"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "fid-coap-mid",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-token",
+          "length": {
+            "type": "token-length"
+          },
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "coap-option(11)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "63"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "8d",
+            "8e"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "up",
+          "target": "8e",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "coap-option(17)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": "8e",
+          "mo": "equal",
+          "cda": "not-sent"
+        }
+      ]
+    },
+    {
+      "rule_id": 12,
+      "rule_id_length": 5,
+      "nature": "compression",
+      "fields": [
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "11",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "200141d003022200",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "00000000000013b3",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-dev-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "1633",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-app-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-checksum",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-coap-version",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-type",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-tkl",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-code",
+          "length_bits": 8,
+          "direction": "down",
+          "target": [
+            "07"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "fid-coap-code",
+          "length_bits": 8,
+          "direction": "up",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-mid",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-token",
+          "length": {
+            "type": "token-length"
+          },
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "coap-option(11)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "63"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "8d",
+            "8e"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        }
+      ]
+    },
+    {
+      "rule_id": 13,
+      "rule_id_length": 5,
+      "nature": "compression",
+      "fields": [
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "11",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "200141d003022200",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "00000000000013b3",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-dev-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "1633",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-app-port",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-checksum",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-coap-version",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-coap-type",
+          "length_bits": 2,
+          "direction": "bi",
+          "target": [
+            "00",
+            "01"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "fid-coap-tkl",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-code",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": [
+            "05",
+            "07",
+            "45"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "fid-coap-mid",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-coap-token",
+          "length": {
+            "type": "token-length"
+          },
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "coap-option(6)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "coap-option(11)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "73"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "8d"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(12)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "up",
+          "target": [
+            "8e"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        },
+        {
+          "field": "coap-option(17)",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "direction": "down",
+          "target": [
+            "8e"
+          ],
+          "mo": "match-mapping",
+          "cda": "mapping-sent"
+        }
+      ]
+    },
+    {
+      "rule_id": 15,
+      "rule_id_length": 5,
+      "nature": "compression",
+      "fields": [
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "3a",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "200141d003022200",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "direction": "bi",
+          "target": "00000000000013b3",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-icmpv6-type",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "01",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-icmpv6-code",
+          "length_bits": 8,
+          "direction": "bi",
+          "target": "04",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-icmpv6-checksum",
+          "length_bits": 16,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-version",
+          "length_bits": 4,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "06",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-trafficclass",
+          "length_bits": 8,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "00",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-flowlabel",
+          "length_bits": 20,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "000000",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-payload-length",
+          "length_bits": 16,
+          "field_position": 2,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-ipv6-nextheader",
+          "length_bits": 8,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "11",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-hoplimit",
+          "length_bits": 8,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "ff",
+          "mo": "ignore",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-devprefix",
+          "length_bits": 64,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "2001066073015c4c",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-deviid",
+          "length_bits": 64,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "0000000000000005",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appprefix",
+          "length_bits": 64,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "200141d003022200",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-ipv6-appiid",
+          "length_bits": 64,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "00000000000013b3",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-dev-port",
+          "length_bits": 16,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "1633",
+          "mo": "equal",
+          "cda": "not-sent"
+        },
+        {
+          "field": "fid-udp-app-port",
+          "length_bits": 16,
+          "field_position": 2,
+          "direction": "bi",
+          "target": null,
+          "mo": "ignore",
+          "cda": "value-sent"
+        },
+        {
+          "field": "fid-udp-length",
+          "length_bits": 16,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-checksum",
+          "length_bits": 16,
+          "field_position": 2,
+          "direction": "bi",
+          "target": "0000",
+          "mo": "ignore",
+          "cda": "compute"
+        },
+        {
+          "field": "fid-udp-payload",
+          "length": {
+            "type": "variable",
+            "unit": "bytes"
+          },
+          "field_position": 2,
+          "direction": "bi",
+          "target": "",
+          "mo": "ignore",
+          "cda": "not-sent"
+        }
+      ]
+    }
+  ]
+}

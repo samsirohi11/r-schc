@@ -32,17 +32,22 @@ impl Decompressor {
     ///
     /// `Position::Core` reconstructs an uplink packet and `Position::Device`
     /// reconstructs a downlink packet.
-    /// `Position::App` follows the core-side behavior because the current core
-    /// model has no separate application-side direction selector.
     ///
     /// # Errors
     ///
     /// Returns [`SchcError::NoMatchingRule`] when the datagram rule ID does not
     /// match a loaded rule.
+    /// Returns [`SchcError::UnsupportedRuleNature`] when the selected rule is a
+    /// no-compression or fragmentation rule.
     /// Returns [`SchcError::InvalidResidue`] when residue bits are malformed or
     /// cannot be reconstructed into a supported packet.
     pub fn decompress(&self, position: Position, compressed: &[u8]) -> Result<Vec<u8>> {
         let (rule, mut reader) = select_rule(self.context.rules().rules(), compressed)?;
+        if rule.nature() != crate::RuleNature::Compression {
+            return Err(SchcError::UnsupportedRuleNature {
+                nature: rule.nature().as_str(),
+            });
+        }
         let direction = inverse_direction(position);
         let fields = decode_fields(rule, direction, &mut reader)?;
         validate_padding(&mut reader)?;
@@ -74,7 +79,7 @@ fn select_rule<'a>(rules: &'a [Rule], compressed: &'a [u8]) -> Result<(&'a Rule,
 fn inverse_direction(position: Position) -> Direction {
     match position {
         Position::Device => Direction::Down,
-        Position::Core | Position::App => Direction::Up,
+        Position::Core => Direction::Up,
     }
 }
 
@@ -90,6 +95,9 @@ fn decode_fields(
         .iter()
         .filter(|field| field.direction.accepts(direction))
     {
+        if matches!(field.field, FieldRef::SyntheticCoapMarker) {
+            continue;
+        }
         if matches!(field.action, Cda::Compute) {
             continue;
         }
@@ -118,6 +126,9 @@ fn decode_field_len(
         (FieldLength::VariableBytes | FieldLength::VariableBits, Cda::NotSent) => {
             not_sent_target_bit_len(field)
         }
+        // Mapping-sent fields derive their length from the selected mapping
+        // entry, not from a residue length prefix.
+        (FieldLength::VariableBytes | FieldLength::VariableBits, Cda::MappingSent) => Ok(0),
         (FieldLength::VariableBytes, _) => Ok(read_variable_length_prefix(reader)? * 8),
         (FieldLength::VariableBits, _) => read_variable_length_prefix(reader),
         (length, _) => lengths.resolve(length, fields),
@@ -157,7 +168,7 @@ fn decode_field_value(
 
 fn decode_mapping_sent(
     target: &TargetValue,
-    bit_len: usize,
+    _bit_len: usize,
     reader: &mut BitReader<'_>,
 ) -> Result<FieldValue> {
     let TargetValue::Mapping(values) = target else {
@@ -175,7 +186,10 @@ fn decode_mapping_sent(
     let value = values.get(index).ok_or_else(|| {
         SchcError::InvalidResidue(format!("mapping index {index} is out of range"))
     })?;
-    bytes_as_value(value, bit_len)
+    // The field length is determined by the selected mapping entry, so variable
+    // length options can be reconstructed without a separate length prefix.
+    let entry_bit_len = value.len() * 8;
+    bytes_as_value(value, entry_bit_len)
 }
 
 fn decode_lsb(field: &FieldRule, bit_len: usize, reader: &mut BitReader<'_>) -> Result<FieldValue> {

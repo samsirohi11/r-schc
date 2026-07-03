@@ -1,8 +1,8 @@
 use schc_core::rule::LengthUnit;
 use schc_core::tree::DecisionTree;
 use schc_core::{
-    Cda, DirectionSelector, FieldLength, FieldRef, MatchingOperator, RuleContext, SchcError,
-    SidRegistry, TargetValue,
+    Cda, Decompressor, DirectionSelector, FieldLength, FieldRef, MatchingOperator, Position,
+    RuleContext, RuleNature, SchcError, SidRegistry, TargetValue,
 };
 
 fn sid_fixture() -> &'static str {
@@ -17,6 +17,10 @@ fn rule_fixture() -> &'static str {
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/rules/udp_coap.json"
     )
+}
+
+fn m2m_rule_fixture() -> &'static str {
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/rules/m2m.json")
 }
 
 #[test]
@@ -52,6 +56,123 @@ fn json_rules_load_into_typed_context() {
     assert_eq!(context.rules().rules()[0].id().value(), 3);
     assert_eq!(context.rules().rules()[0].id().bit_len(), 4);
     assert_eq!(context.rules().rules()[0].fields().len(), 19);
+}
+
+#[test]
+fn m2m_rules_load_in_r_schc_schema() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = std::fs::read_to_string(m2m_rule_fixture()).unwrap();
+
+    let context = RuleContext::from_json_str(&json, registry).unwrap();
+    let rule_ids = context
+        .rules()
+        .rules()
+        .iter()
+        .map(|rule| rule.id().value())
+        .collect::<Vec<_>>();
+
+    assert_eq!(rule_ids, [0, 1, 2, 3, 4, 5, 10, 11, 12, 13, 15]);
+    assert!(context.rules().rules().iter().all(|rule| {
+        rule.fields()
+            .iter()
+            .any(|field| field.action == Cda::Compute)
+    }));
+}
+
+#[test]
+fn json_rules_parse_nature_and_option_number_fields() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 6,
+        "rule_id_length": 4,
+        "nature": "no-compression",
+        "fields": [
+          { "field": "coap-option(17)", "length": { "type": "variable", "unit": "bytes" }, "direction": "down", "target": ["8e"], "mo": "match-mapping", "cda": "mapping-sent" },
+          { "field": "fid-coap-payload-marker", "length_bits": 0, "direction": "bi", "target": null, "mo": "ignore", "cda": "not-sent" }
+        ]
+      }]
+    }
+    "#;
+
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+    let rule = &context.rules().rules()[0];
+
+    assert_eq!(rule.nature(), RuleNature::NoCompression);
+    assert_eq!(rule.fields()[0].field, FieldRef::CoapOption { number: 17 });
+    assert_eq!(rule.fields()[0].direction, DirectionSelector::Down);
+    assert_eq!(rule.fields()[1].field, FieldRef::SyntheticCoapMarker);
+}
+
+#[test]
+fn no_compression_rules_are_representable_but_not_decompressed() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "nature": "no-compression",
+        "fields": []
+      }]
+    }
+    "#;
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+
+    let error = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, &[0x10])
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SchcError::UnsupportedRuleNature {
+            nature: "no-compression"
+        }
+    ));
+}
+
+#[test]
+fn json_rule_rejects_compute_for_non_computable_fields() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" }
+        ]
+      }]
+    }
+    "#;
+
+    assert!(matches!(
+        RuleContext::from_json_str(json, registry),
+        Err(SchcError::InvalidRuleField { .. })
+    ));
+}
+
+#[test]
+fn json_rule_rejects_payload_marker_with_residue() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-coap-payload-marker", "length_bits": 0, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
+        ]
+      }]
+    }
+    "#;
+
+    assert!(matches!(
+        RuleContext::from_json_str(json, registry),
+        Err(SchcError::InvalidRuleField { .. })
+    ));
 }
 
 #[test]
@@ -162,6 +283,44 @@ fn cbor_rules_load_into_typed_context() {
     assert_eq!(context.rules().rules()[0].id().value(), 3);
     assert_eq!(context.rules().rules()[0].id().bit_len(), 4);
     assert_eq!(context.rules().rules()[0].fields().len(), 2);
+}
+
+#[test]
+fn cbor_rule_nature_uses_h_schc_sid_mapping() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = map(vec![(
+        int(2574),
+        map(vec![(
+            int(23),
+            array(vec![
+                map(vec![
+                    (int(1), int(4)),
+                    (int(2), int(1)),
+                    (int(3), int(2941)),
+                    (int(23), array(vec![])),
+                ]),
+                map(vec![
+                    (int(1), int(4)),
+                    (int(2), int(2)),
+                    (int(3), int(2942)),
+                    (int(23), array(vec![])),
+                ]),
+            ]),
+        )]),
+    )]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let context = RuleContext::from_cbor_slice(&cbor, registry).unwrap();
+
+    assert_eq!(
+        context.rules().rules()[0].nature(),
+        RuleNature::NoCompression
+    );
+    assert_eq!(
+        context.rules().rules()[1].nature(),
+        RuleNature::Fragmentation
+    );
 }
 
 #[test]

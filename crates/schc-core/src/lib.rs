@@ -17,6 +17,6 @@ pub use decompress::Decompressor;
 pub use error::{Result, SchcError};
 pub use rule::{
     Cda, Direction, DirectionSelector, FieldLength, FieldRef, MatchingOperator, Position, Rule,
-    RuleContext, RuleId, RuleSet, TargetValue,
+    RuleContext, RuleId, RuleNature, RuleSet, TargetValue,
 };
 pub use sid::SidRegistry;
