@@ -1,0 +1,24 @@
+{
+  "rules": [
+    {
+      "rule_id": 9,
+      "rule_id_length": 4,
+      "fields": [
+        { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+        { "field": "fid-ipv6-trafficclass", "length_bits": 8, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
+        { "field": "fid-ipv6-flowlabel", "length_bits": 20, "direction": "bi", "target": "000000", "mo": "equal", "cda": "not-sent" },
+        { "field": "fid-ipv6-payload-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+        { "field": "fid-ipv6-nextheader", "length_bits": 8, "direction": "bi", "target": "3a", "mo": "equal", "cda": "not-sent" },
+        { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "value-sent" },
+        { "field": "fid-ipv6-devprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+        { "field": "fid-ipv6-deviid", "length_bits": 64, "direction": "bi", "target": "0000000000000001", "mo": "equal", "cda": "not-sent" },
+        { "field": "fid-ipv6-appprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+        { "field": "fid-ipv6-appiid", "length_bits": 64, "direction": "bi", "target": "0000000000000002", "mo": "equal", "cda": "not-sent" },
+        { "field": "fid-icmpv6-type", "length_bits": 8, "direction": "bi", "target": "80", "mo": "equal", "cda": "not-sent" },
+        { "field": "fid-icmpv6-code", "length_bits": 8, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
+        { "field": "fid-icmpv6-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+        { "field": "fid-icmpv6-payload", "length": { "type": "variable", "unit": "bytes" }, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
+      ]
+    }
+  ]
+}

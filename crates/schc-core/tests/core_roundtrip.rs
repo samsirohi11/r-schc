@@ -30,11 +30,60 @@ fn expected_fixture() -> &'static str {
     )
 }
 
+fn coap_path_payload_packet_fixture() -> &'static str {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/packets/coap_path_payload.bin"
+    )
+}
+
+fn coap_path_payload_expected_fixture() -> &'static str {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/expected/coap_path_payload.schc"
+    )
+}
+
+fn icmpv6_echo_packet_fixture() -> &'static str {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/packets/icmpv6_echo.bin"
+    )
+}
+
+fn icmpv6_echo_expected_fixture() -> &'static str {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/expected/icmpv6_echo.schc"
+    )
+}
+
 fn context() -> RuleContext {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let json = std::fs::read_to_string(rule_fixture()).unwrap();
 
     RuleContext::from_json_str(&json, registry).unwrap()
+}
+
+fn dynamic_coap_rule_fixture() -> &'static str {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/rules/dynamic_coap.json"
+    )
+}
+
+fn udp_payload_rule_fixture() -> &'static str {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/rules/udp_payload.json"
+    )
+}
+
+fn icmpv6_echo_rule_fixture() -> &'static str {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/rules/icmpv6_echo.json"
+    )
 }
 
 fn compressor() -> Compressor {
@@ -87,39 +136,14 @@ fn dynamic_token_context() -> RuleContext {
 
 fn coap_options_context() -> RuleContext {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
-    let json = r#"
-    {
-      "rules": [{
-        "rule_id": 4,
-        "rule_id_length": 4,
-        "fields": [
-          { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-trafficclass", "length_bits": 8, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-flowlabel", "length_bits": 20, "direction": "bi", "target": "000000", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-payload-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
-          { "field": "fid-ipv6-nextheader", "length_bits": 8, "direction": "bi", "target": "11", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "value-sent" },
-          { "field": "fid-ipv6-devprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-deviid", "length_bits": 64, "direction": "bi", "target": "0000000000000001", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-appprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-appiid", "length_bits": 64, "direction": "bi", "target": "0000000000000002", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-udp-dev-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-udp-app-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-udp-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
-          { "field": "fid-udp-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
-          { "field": "fid-coap-version", "length_bits": 2, "direction": "bi", "target": "01", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-coap-type", "length_bits": 2, "direction": "bi", "target": "00", "mo": "ignore", "cda": "value-sent" },
-          { "field": "fid-coap-tkl", "length_bits": 4, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
-          { "field": "fid-coap-code", "length_bits": 8, "direction": "bi", "target": "02", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-coap-mid", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
-          { "field": "fid-coap-token", "length": { "type": "token-length" }, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
-          { "field": "fid-coap-option-uri-path", "length": { "type": "variable", "unit": "bytes" }, "direction": "up", "target": "74656d70", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-coap-payload", "length": { "type": "variable", "unit": "bytes" }, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
-        ]
-      }]
-    }
-    "#;
-    RuleContext::from_json_str(json, registry).unwrap()
+    let json = std::fs::read_to_string(dynamic_coap_rule_fixture()).unwrap();
+    RuleContext::from_json_str(&json, registry).unwrap()
+}
+
+fn udp_payload_context() -> RuleContext {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = std::fs::read_to_string(udp_payload_rule_fixture()).unwrap();
+    RuleContext::from_json_str(&json, registry).unwrap()
 }
 
 fn coap_token_packet() -> Vec<u8> {
@@ -190,33 +214,7 @@ fn coap_token_round_trip_uses_dynamic_length() {
 
 #[test]
 fn udp_payload_residue_round_trips_when_rule_has_payload_field() {
-    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
-    let json = r#"
-    {
-      "rules": [{
-        "rule_id": 8,
-        "rule_id_length": 4,
-        "fields": [
-          { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-trafficclass", "length_bits": 8, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-flowlabel", "length_bits": 20, "direction": "bi", "target": "000000", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-payload-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
-          { "field": "fid-ipv6-nextheader", "length_bits": 8, "direction": "bi", "target": "11", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "value-sent" },
-          { "field": "fid-ipv6-devprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-deviid", "length_bits": 64, "direction": "bi", "target": "0000000000000001", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-appprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-appiid", "length_bits": 64, "direction": "bi", "target": "0000000000000002", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-udp-dev-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-udp-app-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-udp-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
-          { "field": "fid-udp-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
-          { "field": "fid-udp-payload", "length": { "type": "variable", "unit": "bytes" }, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
-        ]
-      }]
-    }
-    "#;
-    let context = RuleContext::from_json_str(json, registry).unwrap();
+    let context = udp_payload_context();
     let packet = udp_payload_packet();
 
     let compressed = Compressor::new(context.clone())
@@ -250,31 +248,8 @@ fn coap_options_and_payload_round_trip_with_variable_lengths() {
 
 fn icmpv6_context() -> RuleContext {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
-    let json = r#"
-    {
-      "rules": [{
-        "rule_id": 9,
-        "rule_id_length": 4,
-        "fields": [
-          { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-trafficclass", "length_bits": 8, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-flowlabel", "length_bits": 20, "direction": "bi", "target": "000000", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-payload-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
-          { "field": "fid-ipv6-nextheader", "length_bits": 8, "direction": "bi", "target": "3a", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "value-sent" },
-          { "field": "fid-ipv6-devprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-deviid", "length_bits": 64, "direction": "bi", "target": "0000000000000001", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-appprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-ipv6-appiid", "length_bits": 64, "direction": "bi", "target": "0000000000000002", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-icmpv6-type", "length_bits": 8, "direction": "bi", "target": "80", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-icmpv6-code", "length_bits": 8, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
-          { "field": "fid-icmpv6-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
-          { "field": "fid-icmpv6-payload", "length": { "type": "variable", "unit": "bytes" }, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
-        ]
-      }]
-    }
-    "#;
-    RuleContext::from_json_str(json, registry).unwrap()
+    let json = std::fs::read_to_string(icmpv6_echo_rule_fixture()).unwrap();
+    RuleContext::from_json_str(&json, registry).unwrap()
 }
 
 fn icmpv6_echo_packet() -> Vec<u8> {
@@ -330,6 +305,7 @@ fn compress_then_decompress_restores_ipv6_udp_coap_packet() {
 }
 
 #[test]
+#[ignore = "set SCHC_UPDATE_FIXTURES=1 to rewrite golden fixtures"]
 fn generate_fixtures() {
     if std::env::var_os("SCHC_UPDATE_FIXTURES").is_none() {
         return;
@@ -352,6 +328,50 @@ fn generate_fixtures() {
     .unwrap();
     std::fs::write(packet_fixture(), packet).unwrap();
     std::fs::write(expected_fixture(), compressed.bytes()).unwrap();
+
+    let coap_packet = coap_path_payload_packet();
+    let coap_compressed = Compressor::new(coap_options_context())
+        .unwrap()
+        .compress(Direction::Up, &coap_packet)
+        .unwrap();
+    std::fs::create_dir_all(
+        std::path::Path::new(coap_path_payload_packet_fixture())
+            .parent()
+            .expect("packet fixture path has a parent"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(
+        std::path::Path::new(coap_path_payload_expected_fixture())
+            .parent()
+            .expect("expected fixture path has a parent"),
+    )
+    .unwrap();
+    std::fs::write(coap_path_payload_packet_fixture(), coap_packet).unwrap();
+    std::fs::write(
+        coap_path_payload_expected_fixture(),
+        coap_compressed.bytes(),
+    )
+    .unwrap();
+
+    let icmp_packet = icmpv6_echo_packet();
+    let icmp_compressed = Compressor::new(icmpv6_context())
+        .unwrap()
+        .compress(Direction::Up, &icmp_packet)
+        .unwrap();
+    std::fs::create_dir_all(
+        std::path::Path::new(icmpv6_echo_packet_fixture())
+            .parent()
+            .expect("packet fixture path has a parent"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(
+        std::path::Path::new(icmpv6_echo_expected_fixture())
+            .parent()
+            .expect("expected fixture path has a parent"),
+    )
+    .unwrap();
+    std::fs::write(icmpv6_echo_packet_fixture(), icmp_packet).unwrap();
+    std::fs::write(icmpv6_echo_expected_fixture(), icmp_compressed.bytes()).unwrap();
 }
 
 #[test]
@@ -366,6 +386,44 @@ fn golden_coap_get_round_trip_matches_fixtures() {
 
     let decompressor = Decompressor::new(context).unwrap();
     let restored = decompressor.decompress(Position::Core, &expected).unwrap();
+    assert_eq!(restored, packet);
+}
+
+#[test]
+fn golden_coap_path_payload_round_trip_matches_fixtures() {
+    let packet = std::fs::read(coap_path_payload_packet_fixture()).unwrap();
+    let expected = std::fs::read(coap_path_payload_expected_fixture()).unwrap();
+    let context = coap_options_context();
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+    assert_eq!(compressed.bytes(), expected);
+
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, &expected)
+        .unwrap();
+    assert_eq!(restored, packet);
+}
+
+#[test]
+fn golden_icmpv6_echo_round_trip_matches_fixtures() {
+    let packet = std::fs::read(icmpv6_echo_packet_fixture()).unwrap();
+    let expected = std::fs::read(icmpv6_echo_expected_fixture()).unwrap();
+    let context = icmpv6_context();
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+    assert_eq!(compressed.bytes(), expected);
+
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, &expected)
+        .unwrap();
     assert_eq!(restored, packet);
 }
 
