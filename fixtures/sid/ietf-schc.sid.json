@@ -1,0 +1,210 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "ietf-schc",
+    "module-revision": "2026-05-07",
+    "sid-file-status": "unpublished",
+    "assignment-range": [
+      {
+        "entry-point": "2550",
+        "size": "400"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "ietf-schc",
+        "status": "unstable",
+        "sid": 2550
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fid-ipv6-version",
+        "status": "unstable",
+        "sid": 2860
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fid-ipv6-payload-length",
+        "status": "unstable",
+        "sid": 2865
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fid-udp-length",
+        "status": "unstable",
+        "sid": 2852
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fid-udp-checksum",
+        "status": "unstable",
+        "sid": 2853
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fid-icmpv6-type",
+        "status": "unstable",
+        "sid": 2810
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fid-icmpv6-code",
+        "status": "unstable",
+        "sid": 2811
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fid-icmpv6-checksum",
+        "status": "unstable",
+        "sid": 2812
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fid-icmpv6-identifier",
+        "status": "unstable",
+        "sid": 2813
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fid-coap-version",
+        "status": "unstable",
+        "sid": 2840
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fid-coap-code-class",
+        "status": "unstable",
+        "sid": 2844
+      },
+      {
+        "namespace": "identity",
+        "identifier": "mo-equal",
+        "status": "unstable",
+        "sid": 2900
+      },
+      {
+        "namespace": "identity",
+        "identifier": "mo-ignore",
+        "status": "unstable",
+        "sid": 2901
+      },
+      {
+        "namespace": "identity",
+        "identifier": "mo-rev-rule-match",
+        "status": "unstable",
+        "sid": 2904
+      },
+      {
+        "namespace": "identity",
+        "identifier": "cda-not-sent",
+        "status": "unstable",
+        "sid": 2920
+      },
+      {
+        "namespace": "identity",
+        "identifier": "cda-value-sent",
+        "status": "unstable",
+        "sid": 2921
+      },
+      {
+        "namespace": "identity",
+        "identifier": "cda-compute",
+        "status": "unstable",
+        "sid": 2924
+      },
+      {
+        "namespace": "identity",
+        "identifier": "cda-appiid",
+        "status": "unstable",
+        "sid": 2926
+      },
+      {
+        "namespace": "identity",
+        "identifier": "di-bidirectional",
+        "status": "unstable",
+        "sid": 2880
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fl-token-length",
+        "status": "unstable",
+        "sid": 2892
+      },
+      {
+        "namespace": "identity",
+        "identifier": "fl-variable",
+        "status": "unstable",
+        "sid": 2893
+      },
+      {
+        "namespace": "identity",
+        "identifier": "nature-compression",
+        "status": "unstable",
+        "sid": 2940
+      },
+      {
+        "namespace": "identity",
+        "identifier": "nature-no-compression",
+        "status": "unstable",
+        "sid": 2942
+      },
+      {
+        "namespace": "identity",
+        "identifier": "nature-fragmentation",
+        "status": "unstable",
+        "sid": 2941
+      },
+      {
+        "namespace": "feature",
+        "identifier": "compression",
+        "status": "unstable",
+        "sid": 2948
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-schc:schc",
+        "status": "unstable",
+        "sid": 2574
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-schc:schc/rule/rule-id-length",
+        "status": "unstable",
+        "sid": 2598,
+        "type": "uint8"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-schc:schc/rule/entry/field-length",
+        "status": "unstable",
+        "sid": 2625,
+        "type": [
+          "identityref",
+          "uint8"
+        ]
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-schc:duplicate-rule/output/status",
+        "status": "unstable",
+        "sid": 2690,
+        "type": {
+          "0": "success-with-validation",
+          "1": "success-not-validated",
+          "-1": "to-rule-already-exists",
+          "-2": "from-rule-not-found",
+          "-3": "invalid-ipatch"
+        }
+      }
+    ],
+    "key-mapping": {
+      "2597": [
+        2599,
+        2598
+      ],
+      "2620": [
+        2621
+      ]
+    }
+  }
+}

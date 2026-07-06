@@ -205,7 +205,7 @@ fn reconstruct_icmpv6(
         bytes.extend_from_slice(&[0, 0, 0, 0]);
 
         // Known error types embed the invoking packet, reconstructed with the
-        // direction reversed, matching H-SCHC behavior. The inner packet fields
+        // direction reversed. The inner packet fields
         // live at the next field position.
         if fields
             .first_by_field_position(&FieldRef::Ipv6("fid-ipv6-version"), position + 1)

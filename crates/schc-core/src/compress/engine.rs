@@ -518,7 +518,7 @@ fn is_icmpv6_error_type(message_type: u8) -> bool {
 ///
 /// The embedded packet starts after the 8-byte `ICMPv6` error header
 /// (type, code, checksum, 4 unused bytes) and is parsed with the direction
-/// reversed relative to the outer packet, matching H-SCHC behavior.
+/// reversed relative to the outer packet.
 fn extract_embedded_field(
     packet: &[u8],
     direction: Direction,

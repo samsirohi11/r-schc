@@ -225,8 +225,7 @@ fn parse_nature(rule_index: usize, nature: Option<&str>) -> Result<RuleNature> {
 
 /// Resolves the CBOR rule nature (key 3), defaulting to compression when absent.
 ///
-/// A nature value of `0` is treated as the default (compression), matching the
-/// H-SCHC `rule_data.get(3, 0)` convention.
+/// A nature value of `0` is treated as the default (compression).
 fn cbor_rule_nature(
     sid_registry: &SidRegistry,
     rule_index: usize,
@@ -324,7 +323,13 @@ fn load_field(
             "field",
             &json_field.field,
         )?;
-        field_ref(&json_field.field, field_sid)
+        resolve_supported_field_ref(
+            rule_index,
+            entry_index,
+            &json_field.field,
+            field_sid,
+            field_ref(&json_field.field, field_sid),
+        )?
     };
 
     let rule = FieldRule {
@@ -423,15 +428,37 @@ fn load_cbor_normal_field(
     entry_order: usize,
     value: &Value,
 ) -> Result<FieldRule> {
+    load_cbor_coreconf_field(sid_registry, rule_index, entry_order, value)
+}
+
+/// Parses a CORECONF compression field entry using the IETF SCHC CORECONF CBOR key map.
+///
+/// Key map: 1 = entry-index, 2 = field-id, 5 = field-length,
+/// 6 = field-length-value, 7 = direction-indicator, 8 = field-position,
+/// 9 = target-value, 12 = matching-operator, 13 = matching-operator-value,
+/// 16 = comp-decomp-action.
+fn load_cbor_coreconf_field(
+    sid_registry: &SidRegistry,
+    rule_index: usize,
+    entry_order: usize,
+    value: &Value,
+) -> Result<FieldRule> {
     let entry_index = required_field_usize(value, 1, rule_index, entry_order)?;
-    let field_sid = required_field_u64(value, 3, rule_index, entry_order)?;
+    let field_sid = required_field_u64(value, 2, rule_index, entry_order)?;
     let field_identifier =
         sid_identifier(sid_registry, rule_index, entry_order, "field", field_sid)?;
+    let field = resolve_supported_field_ref(
+        rule_index,
+        entry_order,
+        &field_identifier,
+        field_sid,
+        field_ref(&field_identifier, field_sid),
+    )?;
     let length = cbor_field_length(
         sid_registry,
         value,
-        4,
-        map_value(value, 5),
+        5,
+        map_value(value, 6),
         rule_index,
         entry_order,
     )?;
@@ -439,11 +466,11 @@ fn load_cbor_normal_field(
         sid_registry,
         rule_index,
         entry_order,
-        required_field_u64(value, 6, rule_index, entry_order)?,
+        required_field_u64(value, 7, rule_index, entry_order)?,
     )?;
-    let field_position = required_field_usize(value, 7, rule_index, entry_order)?;
+    let field_position = required_field_usize(value, 8, rule_index, entry_order)?;
     let target = cbor_target_value(
-        required_field_value(value, 8, rule_index, entry_order)?,
+        required_field_value(value, 9, rule_index, entry_order)?,
         rule_index,
         entry_order,
     )?;
@@ -451,18 +478,18 @@ fn load_cbor_normal_field(
         sid_registry,
         rule_index,
         entry_order,
-        required_field_u64(value, 11, rule_index, entry_order)?,
-        map_value(value, 12),
+        required_field_u64(value, 12, rule_index, entry_order)?,
+        map_value(value, 13),
     )?;
     let action = cbor_cda(
         sid_registry,
         rule_index,
         entry_order,
-        required_field_u64(value, 15, rule_index, entry_order)?,
+        required_field_u64(value, 16, rule_index, entry_order)?,
     )?;
 
     let rule = FieldRule {
-        field: field_ref(&field_identifier, field_sid),
+        field,
         length,
         field_position,
         direction,
@@ -474,6 +501,7 @@ fn load_cbor_normal_field(
     validate_field_rule(rule_index, &rule)?;
     Ok(rule)
 }
+
 
 fn load_cbor_universal_option_field(
     sid_registry: &SidRegistry,
@@ -1168,6 +1196,34 @@ fn field_ref(identifier: &str, sid: u64) -> FieldRef {
         "fid-icmpv6-payload" => FieldRef::Icmpv6("fid-icmpv6-payload"),
         _ => FieldRef::UnknownSid(sid),
     }
+}
+
+/// Returns a loadable field reference, or an explicit error when `resolved` is
+/// [`FieldRef::UnknownSid`].
+///
+/// A SID that the registry knows but the compression core does not map to a
+/// built-in field family must not be silently accepted in a rule: the SID is
+/// loadable as a name in the registry, but using it in a rule entry is
+/// unsupported and must be reported with the field identifier, the SID, and
+/// the rule/entry context so callers can diagnose the gap.
+fn resolve_supported_field_ref(
+    rule_index: usize,
+    entry_index: usize,
+    identifier: &str,
+    field_sid: u64,
+    resolved: FieldRef,
+) -> Result<FieldRef> {
+    if matches!(resolved, FieldRef::UnknownSid(_)) {
+        return Err(invalid_field(
+            rule_index,
+            entry_index,
+            format!(
+                "unsupported field identifier {identifier} (SID {field_sid}) is not mapped to a \
+                 compression-core field family"
+            ),
+        ));
+    }
+    Ok(resolved)
 }
 
 fn validate_field_identifier(

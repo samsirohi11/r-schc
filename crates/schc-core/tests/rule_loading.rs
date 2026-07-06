@@ -286,7 +286,7 @@ fn cbor_rules_load_into_typed_context() {
 }
 
 #[test]
-fn cbor_rule_nature_uses_h_schc_sid_mapping() {
+fn cbor_rule_nature_uses_coreconf_sid_mapping() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let root = map(vec![(
         int(2574),
@@ -471,13 +471,13 @@ fn normal_field_with_length(
 ) -> ciborium::value::Value {
     map(vec![
         (int(1), int(entry_index)),
-        (int(3), int(field_sid)),
-        (int(4), length),
-        (int(6), int(direction_sid)),
-        (int(7), int(1)),
-        (int(8), target_list(vec![target])),
-        (int(11), int(matching_sid)),
-        (int(15), int(cda_sid)),
+        (int(2), int(field_sid)),
+        (int(5), length),
+        (int(7), int(direction_sid)),
+        (int(8), int(1)),
+        (int(9), target_list(vec![target])),
+        (int(12), int(matching_sid)),
+        (int(16), int(cda_sid)),
     ])
 }
 
@@ -495,14 +495,14 @@ struct NormalFieldWithLengthValue {
 fn normal_field_with_length_value(field: NormalFieldWithLengthValue) -> ciborium::value::Value {
     map(vec![
         (int(1), int(field.entry_index)),
-        (int(3), int(field.field_sid)),
-        (int(4), field.length),
-        (int(5), field.length_value),
-        (int(6), int(field.direction_sid)),
-        (int(7), int(1)),
-        (int(8), target_list(vec![field.target])),
-        (int(11), int(field.matching_sid)),
-        (int(15), int(field.cda_sid)),
+        (int(2), int(field.field_sid)),
+        (int(5), field.length),
+        (int(6), field.length_value),
+        (int(7), int(field.direction_sid)),
+        (int(8), int(1)),
+        (int(9), target_list(vec![field.target])),
+        (int(12), int(field.matching_sid)),
+        (int(16), int(field.cda_sid)),
     ])
 }
 

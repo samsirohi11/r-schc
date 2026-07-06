@@ -3,10 +3,16 @@ use std::fs;
 use std::path::Path;
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::error::{Result, SchcError};
 
 /// One entry in a SID registry.
+///
+/// The compression core only depends on the SID value and identifier. Other
+/// fields are deserialized for completeness and to keep the registry compatible
+/// with the IETF SCHC SID file shape, where the optional `type` field of a
+/// data-namespace item may be a string, an array, or an object.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct SidItem {
     /// Numeric SID value.
@@ -19,8 +25,12 @@ pub struct SidItem {
     #[serde(rename = "module-name")]
     pub module_name: Option<String>,
     /// Optional item type from the SID file `type` field.
-    #[serde(rename = "type")]
-    pub item_type: Option<String>,
+    ///
+    /// Stored as a generic JSON value because the IETF SCHC SID file shape uses
+    /// string, array, and object values depending on the item namespace.
+    /// The compression core does not interpret this field.
+    #[serde(rename = "type", default)]
+    pub item_type: Option<Value>,
     /// Optional lifecycle status.
     pub status: Option<String>,
 }
