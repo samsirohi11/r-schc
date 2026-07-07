@@ -59,6 +59,22 @@ pub enum SchcError {
         reason: String,
     },
 
+    /// Two rule IDs collide because one is a bit-prefix of the other, or they
+    /// are exact duplicates. A compressed packet starts with a variable-length
+    /// rule ID, so such a collision would let decompression select the wrong
+    /// rule depending on insertion order. The core rejects these at load time.
+    #[error("ambiguous rule ID prefix: rule ID {first_value} ({first_bits} bits) is a prefix of rule ID {second_value} ({second_bits} bits)")]
+    AmbiguousRuleIdPrefix {
+        /// Numeric value of the shorter (or equal-length) rule ID.
+        first_value: u64,
+        /// Bit length of the first rule ID.
+        first_bits: usize,
+        /// Numeric value of the longer (or equal-length) rule ID.
+        second_value: u64,
+        /// Bit length of the second rule ID.
+        second_bits: usize,
+    },
+
     /// A rule field is structurally invalid.
     #[error("invalid rule field rule={rule_index} entry={entry_index}: {reason}")]
     InvalidRuleField {

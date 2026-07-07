@@ -557,6 +557,151 @@ fn int(value: i128) -> ciborium::value::Value {
 }
 
 #[test]
+fn json_rule_id_rejects_prefix_collision() {
+    let registry = SidRegistry::default();
+    // Rule IDs in binary: `1` (1 bit) and `10` (2 bits). The 1-bit ID is a
+    // bit-prefix of the 2-bit ID, so decompression could select the wrong
+    // rule depending on insertion order.
+    let json = r#"
+    {
+      "rules": [
+        { "rule_id": 1, "rule_id_length": 1, "nature": "no-compression", "fields": [] },
+        { "rule_id": 2, "rule_id_length": 2, "nature": "no-compression", "fields": [] }
+      ]
+    }
+    "#;
+
+    assert!(matches!(
+        RuleContext::from_json_str(json, registry),
+        Err(SchcError::AmbiguousRuleIdPrefix {
+            first_value: 1,
+            first_bits: 1,
+            second_value: 2,
+            second_bits: 2
+        })
+    ));
+}
+
+#[test]
+fn json_rule_id_reports_shorter_prefix_first_when_longer_id_appears_first() {
+    let registry = SidRegistry::default();
+    // Rule IDs in binary: `10` (2 bits) appears before `1` (1 bit). The shorter
+    // ID is still the bit-prefix and must be reported first in the error.
+    let json = r#"
+    {
+      "rules": [
+        { "rule_id": 2, "rule_id_length": 2, "nature": "no-compression", "fields": [] },
+        { "rule_id": 1, "rule_id_length": 1, "nature": "no-compression", "fields": [] }
+      ]
+    }
+    "#;
+
+    assert!(matches!(
+        RuleContext::from_json_str(json, registry),
+        Err(SchcError::AmbiguousRuleIdPrefix {
+            first_value: 1,
+            first_bits: 1,
+            second_value: 2,
+            second_bits: 2
+        })
+    ));
+}
+
+#[test]
+fn json_rule_id_rejects_exact_duplicate() {
+    let registry = SidRegistry::default();
+    // Two rules with the same rule ID value and bit length (binary `101`).
+    let json = r#"
+    {
+      "rules": [
+        { "rule_id": 5, "rule_id_length": 3, "nature": "no-compression", "fields": [] },
+        { "rule_id": 5, "rule_id_length": 3, "nature": "no-compression", "fields": [] }
+      ]
+    }
+    "#;
+
+    assert!(matches!(
+        RuleContext::from_json_str(json, registry),
+        Err(SchcError::AmbiguousRuleIdPrefix {
+            first_value: 5,
+            first_bits: 3,
+            second_value: 5,
+            second_bits: 3
+        })
+    ));
+}
+
+#[test]
+fn json_rule_id_accepts_non_prefixing_ids() {
+    let registry = SidRegistry::default();
+    // Rule IDs in binary: `10` (2 bits), `110` (3 bits), `0` (1 bit). None is a
+    // bit-prefix of another (top 2 bits of `110` are `11`, top 1 bit of `10` and
+    // `110` is `1` which differs from `0`).
+    let json = r#"
+    {
+      "rules": [
+        { "rule_id": 2, "rule_id_length": 2, "nature": "no-compression", "fields": [] },
+        { "rule_id": 6, "rule_id_length": 3, "nature": "no-compression", "fields": [] },
+        { "rule_id": 0, "rule_id_length": 1, "nature": "no-compression", "fields": [] }
+      ]
+    }
+    "#;
+
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+    let ids = context
+        .rules()
+        .rules()
+        .iter()
+        .map(|rule| (rule.id().value(), rule.id().bit_len()))
+        .collect::<Vec<_>>();
+    assert_eq!(ids, [(2, 2), (6, 3), (0, 1)]);
+}
+
+#[test]
+fn cbor_rule_id_rejects_prefix_collision() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    // CORECONF CBOR rule metadata keys: key 1 = rule ID length, key 2 = rule ID
+    // value, key 3 = rule nature, key 23 = entries. Two rules whose IDs collide:
+    // binary `1` (1 bit) is a bit-prefix of binary `10` (2 bits).
+    let root = map(vec![
+        (
+            int(2574),
+            map(vec![
+                (
+                    int(23),
+                    array(vec![
+                        map(vec![
+                            (int(1), int(1)),
+                            (int(2), int(1)),
+                            (int(3), int(2941)),
+                            (int(23), array(vec![])),
+                        ]),
+                        map(vec![
+                            (int(1), int(2)),
+                            (int(2), int(2)),
+                            (int(3), int(2941)),
+                            (int(23), array(vec![])),
+                        ]),
+                    ]),
+                ),
+            ]),
+        ),
+    ]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    assert!(matches!(
+        RuleContext::from_cbor_slice(&cbor, registry),
+        Err(SchcError::AmbiguousRuleIdPrefix {
+            first_value: 1,
+            first_bits: 1,
+            second_value: 2,
+            second_bits: 2
+        })
+    ));
+}
+
+#[test]
 fn json_rule_rejects_mapping_sent_without_mapping_target() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let json = r#"

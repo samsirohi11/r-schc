@@ -127,6 +127,7 @@ impl RuleContext {
                 nature,
             ));
         }
+        validate_rule_id_prefixes(&rules)?;
 
         Ok(Self {
             rules: RuleSet::new(rules, sid_registry),
@@ -183,6 +184,7 @@ impl RuleContext {
                 nature,
             ));
         }
+        validate_rule_id_prefixes(&rules)?;
 
         Ok(Self {
             rules: RuleSet::new(rules, sid_registry),
@@ -193,6 +195,56 @@ impl RuleContext {
     #[must_use]
     pub fn rules(&self) -> &RuleSet {
         &self.rules
+    }
+}
+
+/// Rejects rule sets where one rule ID is a bit-prefix of another, including
+/// exact duplicates.
+///
+/// A compressed SCHC packet begins with a variable-length rule ID. If one ID
+/// is a bit-prefix of another, decompression can select the wrong rule depending
+/// on insertion order. The first detected collision is reported with both rule
+/// ID values and bit lengths. The shorter ID is reported as `first`; for equal
+/// lengths (exact duplicates) the earlier rule in load order is `first`.
+fn validate_rule_id_prefixes(rules: &[Rule]) -> Result<()> {
+    for (later_index, later) in rules.iter().enumerate() {
+        for earlier in &rules[..later_index] {
+            let earlier_id = earlier.id();
+            let later_id = later.id();
+            if let Some((first, second)) = rule_id_collision(earlier_id, later_id) {
+                return Err(SchcError::AmbiguousRuleIdPrefix {
+                    first_value: first.value(),
+                    first_bits: first.bit_len(),
+                    second_value: second.value(),
+                    second_bits: second.bit_len(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Returns the colliding rule ID pair ordered as `(prefix, container)` when the
+/// two IDs collide, or `None` when they are independent.
+///
+/// Equal-length IDs collide only when their values match (exact duplicates).
+/// For differing lengths, the shorter ID collides when its value equals the top
+/// `shorter.bit_len()` bits of the longer ID. The returned pair is ordered so
+/// the shorter (prefix) ID is first; for exact duplicates the `earlier` argument
+/// is first to keep reporting stable.
+fn rule_id_collision(earlier: RuleId, later: RuleId) -> Option<(RuleId, RuleId)> {
+    match earlier.bit_len().cmp(&later.bit_len()) {
+        core::cmp::Ordering::Equal => {
+            (earlier.value() == later.value()).then_some((earlier, later))
+        }
+        core::cmp::Ordering::Less => {
+            let prefix = later.value() >> (later.bit_len() - earlier.bit_len());
+            (prefix == earlier.value()).then_some((earlier, later))
+        }
+        core::cmp::Ordering::Greater => {
+            let prefix = earlier.value() >> (earlier.bit_len() - later.bit_len());
+            (prefix == later.value()).then_some((later, earlier))
+        }
     }
 }
 
