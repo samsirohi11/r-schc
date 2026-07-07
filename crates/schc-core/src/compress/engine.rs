@@ -142,16 +142,26 @@ impl Compressor {
                 .get(rule_order)
                 .map_or(RuleNature::Compression, Rule::nature);
             if nature == RuleNature::Compression {
-                let mut writer = BitWriter::new();
-                writer.write_bits(rule_id.value(), rule_id.bit_len())?;
-                append_bits(&mut writer, &state.residue)?;
-                candidates.push(Candidate {
-                    rule_order,
-                    datagram: CompressedDatagram {
-                        bytes: writer.to_vec(),
-                        bit_len: writer.bit_len(),
-                    },
-                });
+                // Verify the rule accounts for every byte of the original
+                // packet by reconstructing from the extracted fields. If the
+                // reconstruction does not match, the rule silently omits
+                // payload bytes and must not be accepted.
+                let reconstructed =
+                    crate::packet::builder::reconstruct_packet(direction, &state.fields);
+                if let Ok(ref bytes) = reconstructed {
+                    if bytes.as_slice() == packet {
+                        let mut writer = BitWriter::new();
+                        writer.write_bits(rule_id.value(), rule_id.bit_len())?;
+                        append_bits(&mut writer, &state.residue)?;
+                        candidates.push(Candidate {
+                            rule_order,
+                            datagram: CompressedDatagram {
+                                bytes: writer.to_vec(),
+                                bit_len: writer.bit_len(),
+                            },
+                        });
+                    }
+                }
             } else {
                 nature_errors.push(nature);
             }
@@ -229,8 +239,6 @@ struct CompressionState {
     fields: FieldStore,
     lengths: LengthResolver,
     coap_option_index: usize,
-    #[allow(dead_code)]
-    residual_tail: Vec<u8>,
 }
 
 impl Default for CompressionState {
@@ -240,7 +248,6 @@ impl Default for CompressionState {
             fields: FieldStore::default(),
             lengths: LengthResolver::default(),
             coap_option_index: 0,
-            residual_tail: Vec::new(),
         }
     }
 }

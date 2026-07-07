@@ -595,3 +595,63 @@ fn decompressor_rejects_full_byte_trailing_residue_without_payload_field() {
 
     assert!(matches!(error, SchcError::InvalidResidue(_)));
 }
+
+#[test]
+fn decompressor_rejects_nonzero_sub_byte_padding() {
+    let context = context();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    let compressed = compressor()
+        .compress(Direction::Up, &coap_get_packet())
+        .unwrap();
+    // The compressed datagram ends with zero sub-byte padding. Flip the last
+    // padding bit to make it non-zero.
+    let mut bytes = compressed.bytes().to_vec();
+    *bytes.last_mut().unwrap() |= 0x01;
+
+    let error = decompressor
+        .decompress(Position::Core, &bytes)
+        .unwrap_err();
+
+    assert!(matches!(error, SchcError::InvalidResidue(_)));
+}
+
+#[test]
+fn decompressor_accepts_zero_sub_byte_padding() {
+    let context = context();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    let compressed = compressor()
+        .compress(Direction::Up, &coap_get_packet())
+        .unwrap();
+    // The compressed datagram already ends with zero sub-byte padding; verify
+    // that decompression succeeds without modifying the padding bits.
+    let restored = decompressor
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+
+    assert_eq!(restored, coap_get_packet());
+}
+
+#[test]
+fn compression_without_payload_field_rejects_packet_with_payload() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = std::fs::read_to_string(udp_payload_rule_fixture()).unwrap();
+    // Remove the explicit UDP payload field so the rule no longer accounts for
+    // UDP payload bytes. The compressor must not silently accept a packet whose
+    // payload bytes no field consumed.
+    let json = json.replace(
+        r#""cda": "compute" },
+        { "field": "fid-udp-payload", "length": { "type": "variable", "unit": "bytes" }, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }"#,
+        r#""cda": "compute" }"#,
+    );
+    let context = RuleContext::from_json_str(&json, registry).unwrap();
+    let packet = udp_payload_packet();
+
+    let error = Compressor::new(context)
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap_err();
+
+    assert!(matches!(error, SchcError::NoMatchingRule));
+}
