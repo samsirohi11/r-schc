@@ -1,6 +1,249 @@
+use schc_core::bit::BitWriter;
 use schc_core::{
     Compressor, Decompressor, Direction, Position, RuleContext, SchcError, SidRegistry,
 };
+
+/// Builds an expected no-compression datagram by bit-packing the rule ID
+/// followed by the original packet bytes. This mirrors the SCHC no-compression
+/// rule layout: the rule ID is written most-significant-bit first and the
+/// packet bytes follow with zero-bit padding to the next byte boundary.
+fn expected_no_compression(rule_id_value: u64, rule_id_bits: usize, packet: &[u8]) -> Vec<u8> {
+    let mut writer = BitWriter::new();
+    writer.write_bits(rule_id_value, rule_id_bits).unwrap();
+    for byte in packet {
+        writer.write_bits(u64::from(*byte), 8).unwrap();
+    }
+    writer.to_vec()
+}
+
+/// A no-compression rule context with a byte-aligned 8-bit rule ID.
+fn no_compression_byte_aligned_context() -> RuleContext {
+    let registry = SidRegistry::default();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 66,
+        "rule_id_length": 8,
+        "nature": "no-compression",
+        "fields": []
+      }]
+    }
+    "#;
+    RuleContext::from_json_str(json, registry).unwrap()
+}
+
+/// A no-compression rule context with a non-byte-aligned 4-bit rule ID.
+fn no_compression_non_byte_aligned_context() -> RuleContext {
+    let registry = SidRegistry::default();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 3,
+        "rule_id_length": 4,
+        "nature": "no-compression",
+        "fields": []
+      }]
+    }
+    "#;
+    RuleContext::from_json_str(json, registry).unwrap()
+}
+
+/// A rule context containing both a compression rule and a no-compression
+/// fallback rule. The no-compression rule must only be selected when no
+/// compression rule matches.
+fn compression_with_no_compression_fallback_context() -> RuleContext {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [
+        {
+          "rule_id": 3,
+          "rule_id_length": 4,
+          "fields": [
+            { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-trafficclass", "length_bits": 8, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-flowlabel", "length_bits": 20, "direction": "bi", "target": "000000", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-payload-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+            { "field": "fid-ipv6-nextheader", "length_bits": 8, "direction": "bi", "target": "11", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "value-sent" },
+            { "field": "fid-ipv6-devprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-deviid", "length_bits": 64, "direction": "bi", "target": "0000000000000001", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-appprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-appiid", "length_bits": 64, "direction": "bi", "target": "0000000000000002", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-dev-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-app-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+            { "field": "fid-udp-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+            { "field": "fid-coap-version", "length_bits": 2, "direction": "bi", "target": "01", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-coap-type", "length_bits": 2, "direction": "bi", "target": "00", "mo": "ignore", "cda": "value-sent" },
+            { "field": "fid-coap-tkl", "length_bits": 4, "direction": "bi", "target": "00", "mo": "ignore", "cda": "value-sent" },
+            { "field": "fid-coap-code", "length_bits": 8, "direction": "bi", "target": "01", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-coap-mid", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
+          ]
+        },
+        { "rule_id": 15, "rule_id_length": 4, "nature": "no-compression", "fields": [] }
+      ]
+    }
+    "#;
+    RuleContext::from_json_str(json, registry).unwrap()
+}
+
+#[test]
+fn no_compression_byte_aligned_emits_rule_id_then_packet() {
+    let context = no_compression_byte_aligned_context();
+    let compressor = Compressor::new(context).unwrap();
+    let packet = coap_get_packet();
+
+    let compressed = compressor.compress(Direction::Up, &packet).unwrap();
+
+    let expected = expected_no_compression(66, 8, &packet);
+    assert_eq!(compressed.bytes(), expected);
+    assert_eq!(compressed.bit_len(), 8 + packet.len() * 8);
+}
+
+#[test]
+fn no_compression_byte_aligned_round_trip_restores_packet() {
+    let context = no_compression_byte_aligned_context();
+    let packet = coap_get_packet();
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+
+    assert_eq!(restored, packet);
+}
+
+#[test]
+fn no_compression_non_byte_aligned_emits_bit_packed_rule_id_and_packet() {
+    let context = no_compression_non_byte_aligned_context();
+    let compressor = Compressor::new(context).unwrap();
+    let packet = coap_get_packet();
+
+    let compressed = compressor.compress(Direction::Up, &packet).unwrap();
+
+    let expected = expected_no_compression(3, 4, &packet);
+    assert_eq!(compressed.bytes(), expected);
+    assert_eq!(compressed.bit_len(), 4 + packet.len() * 8);
+}
+
+#[test]
+fn no_compression_non_byte_aligned_round_trip_restores_packet() {
+    let context = no_compression_non_byte_aligned_context();
+    let packet = coap_get_packet();
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+
+    assert_eq!(restored, packet);
+}
+
+#[test]
+fn no_compression_compresses_arbitrary_non_ipv6_bytes() {
+    let context = no_compression_non_byte_aligned_context();
+    let packet = b"raw\0bytes".to_vec();
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+
+    let expected = expected_no_compression(3, 4, &packet);
+    assert_eq!(compressed.bytes(), expected);
+    assert_eq!(compressed.bit_len(), 4 + packet.len() * 8);
+
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+    assert_eq!(restored, packet);
+}
+
+#[test]
+fn no_compression_fallback_wraps_non_ipv6_packet() {
+    let context = compression_with_no_compression_fallback_context();
+    let packet = b"not an IPv6 packet".to_vec();
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+
+    let expected = expected_no_compression(15, 4, &packet);
+    assert_eq!(compressed.bytes(), expected);
+    assert_eq!(compressed.bit_len(), 4 + packet.len() * 8);
+
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+    assert_eq!(restored, packet);
+}
+
+#[test]
+fn no_compression_datagram_with_only_padding_returns_empty_packet() {
+    let context = no_compression_non_byte_aligned_context();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    // A 4-bit rule ID followed by four zero padding bits, with no packet bytes.
+    let datagram = [0x30];
+
+    let restored = decompressor
+        .decompress(Position::Core, &datagram)
+        .unwrap();
+
+    assert!(restored.is_empty());
+}
+
+#[test]
+fn no_compression_fallback_selected_only_when_no_compression_rule_matches() {
+    let context = compression_with_no_compression_fallback_context();
+    let compressor = Compressor::new(context.clone()).unwrap();
+    let packet = coap_get_packet();
+
+    // The matching compression rule (rule ID 3) produces a shorter datagram
+    // than the no-compression fallback, so it must be selected.
+    let compressed = compressor.compress(Direction::Up, &packet).unwrap();
+    assert_eq!(compressed.bytes()[0] >> 4, 0b0011);
+
+    // A packet that does not match the compression rule must fall back to the
+    // no-compression rule (rule ID 15).
+    let mut mismatched = packet.clone();
+    mismatched[6] = 0x3a;
+    let fallback = compressor.compress(Direction::Up, &mismatched).unwrap();
+    assert_eq!(fallback.bytes()[0] >> 4, 0b1111);
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, fallback.bytes())
+        .unwrap();
+    assert_eq!(restored, mismatched);
+}
+
+#[test]
+fn no_compression_decompression_rejects_nonzero_padding() {
+    let context = no_compression_non_byte_aligned_context();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    // A 4-bit rule ID followed by four nonzero padding bits, with no packet
+    // bytes. The nonzero padding must be rejected.
+    let datagram = [0x3f];
+
+    let error = decompressor
+        .decompress(Position::Core, &datagram)
+        .unwrap_err();
+
+    assert!(matches!(error, SchcError::InvalidResidue(_)));
+}
 
 fn sid_fixture() -> &'static str {
     concat!(
@@ -812,4 +1055,58 @@ fn direction_split_downlink_packet_does_not_match_uplink_rule() {
         .unwrap_err();
 
     assert!(matches!(error, SchcError::NoMatchingRule));
+}
+
+#[test]
+fn fragmentation_rule_remains_unsupported_for_compression() {
+    let registry = SidRegistry::default();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 8,
+        "nature": "fragmentation",
+        "fields": []
+      }]
+    }
+    "#;
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+    let compressor = Compressor::new(context).unwrap();
+
+    let error = compressor
+        .compress(Direction::Up, &coap_get_packet())
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        SchcError::UnsupportedRuleNature {
+            nature: "fragmentation"
+        }
+    ));
+}
+
+#[test]
+fn fragmentation_rule_remains_unsupported_for_decompression() {
+    let registry = SidRegistry::default();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 8,
+        "nature": "fragmentation",
+        "fields": []
+      }]
+    }
+    "#;
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    let error = decompressor.decompress(Position::Core, &[0x01]).unwrap_err();
+
+    assert!(matches!(
+        error,
+        SchcError::UnsupportedRuleNature {
+            nature: "fragmentation"
+        }
+    ));
 }

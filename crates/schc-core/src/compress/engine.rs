@@ -67,22 +67,30 @@ impl Compressor {
         Ok(Self { context, tree })
     }
 
-    /// Compresses one IPv6 packet.
+    /// Compresses one packet.
     ///
-    /// Rules whose nature is not [`RuleNature::Compression`] are not processed:
-    /// reaching a no-compression or fragmentation leaf returns a clear
-    /// [`SchcError::UnsupportedRuleNature`] instead of silently compressing.
+    /// Rules whose nature is not [`RuleNature::Compression`] or
+    /// [`RuleNature::NoCompression`] are not processed: reaching a
+    /// fragmentation leaf returns a clear [`SchcError::UnsupportedRuleNature`]
+    /// instead of silently compressing. A no-compression rule emits the rule ID
+    /// followed by the original packet bytes.
     ///
     /// # Errors
     ///
-    /// Returns [`SchcError::Packet`] when packet parsing fails.
+    /// Returns [`SchcError::Packet`] when packet parsing fails and no
+    /// empty-fields no-compression rule can wrap the original bytes.
     /// Returns [`SchcError::NoMatchingRule`] when no rule path matches.
     /// Returns [`SchcError::UnsupportedRuleNature`] when the only matching rule
-    /// is a no-compression or fragmentation rule.
+    /// is a fragmentation rule.
     /// Returns [`SchcError::InvalidResidue`] when residue encoding cannot be
     /// represented.
     pub fn compress(&self, direction: Direction, packet: &[u8]) -> Result<CompressedDatagram> {
-        Ipv6Packet::parse(packet)?;
+        if let Err(error) = Ipv6Packet::parse(packet) {
+            if let Some(candidate) = self.empty_no_compression_candidate(packet)? {
+                return Ok(candidate.datagram);
+            }
+            return Err(error);
+        }
 
         let mut candidates = Vec::new();
         let mut nature_errors = Vec::new();
@@ -124,6 +132,15 @@ impl Compressor {
         &self.context
     }
 
+    fn empty_no_compression_candidate(&self, packet: &[u8]) -> Result<Option<Candidate>> {
+        for (rule_order, rule) in self.context.rules().rules().iter().enumerate() {
+            if rule.nature() == RuleNature::NoCompression && rule.fields().is_empty() {
+                return no_compression_candidate(rule_order, rule.id(), packet).map(Some);
+            }
+        }
+        Ok(None)
+    }
+
     fn traverse(
         &self,
         node_index: usize,
@@ -141,29 +158,35 @@ impl Compressor {
                 .rules()
                 .get(rule_order)
                 .map_or(RuleNature::Compression, Rule::nature);
-            if nature == RuleNature::Compression {
-                // Verify the rule accounts for every byte of the original
-                // packet by reconstructing from the extracted fields. If the
-                // reconstruction does not match, the rule silently omits
-                // payload bytes and must not be accepted.
-                let reconstructed =
-                    crate::packet::builder::reconstruct_packet(direction, &state.fields);
-                if let Ok(ref bytes) = reconstructed {
-                    if bytes.as_slice() == packet {
-                        let mut writer = BitWriter::new();
-                        writer.write_bits(rule_id.value(), rule_id.bit_len())?;
-                        append_bits(&mut writer, &state.residue)?;
-                        candidates.push(Candidate {
-                            rule_order,
-                            datagram: CompressedDatagram {
-                                bytes: writer.to_vec(),
-                                bit_len: writer.bit_len(),
-                            },
-                        });
+            match nature {
+                RuleNature::Compression => {
+                    // Verify the rule accounts for every byte of the original
+                    // packet by reconstructing from the extracted fields. If the
+                    // reconstruction does not match, the rule silently omits
+                    // payload bytes and must not be accepted.
+                    let reconstructed =
+                        crate::packet::builder::reconstruct_packet(direction, &state.fields);
+                    if let Ok(ref bytes) = reconstructed {
+                        if bytes.as_slice() == packet {
+                            let mut writer = BitWriter::new();
+                            writer.write_bits(rule_id.value(), rule_id.bit_len())?;
+                            append_bits(&mut writer, &state.residue)?;
+                            candidates.push(Candidate {
+                                rule_order,
+                                datagram: CompressedDatagram {
+                                    bytes: writer.to_vec(),
+                                    bit_len: writer.bit_len(),
+                                },
+                            });
+                        }
                     }
                 }
-            } else {
-                nature_errors.push(nature);
+                RuleNature::NoCompression => candidates.push(no_compression_candidate(
+                    rule_order,
+                    rule_id,
+                    packet,
+                )?),
+                RuleNature::Fragmentation => nature_errors.push(nature),
             }
         }
 
@@ -393,6 +416,28 @@ fn append_bits(output: &mut BitWriter, input: &BitWriter) -> Result<()> {
         output.write_bits(reader.read_bits(1)?, 1)?;
     }
     Ok(())
+}
+
+/// Builds a no-compression candidate by writing the rule ID followed by the
+/// original packet bytes. The rule ID may be non-byte-aligned, so the packet
+/// bits are written directly after it and the final byte is zero-padded.
+fn no_compression_candidate(
+    rule_order: usize,
+    rule_id: crate::RuleId,
+    packet: &[u8],
+) -> Result<Candidate> {
+    let mut writer = BitWriter::new();
+    writer.write_bits(rule_id.value(), rule_id.bit_len())?;
+    for byte in packet {
+        writer.write_bits(u64::from(*byte), 8)?;
+    }
+    Ok(Candidate {
+        rule_order,
+        datagram: CompressedDatagram {
+            bytes: writer.to_vec(),
+            bit_len: writer.bit_len(),
+        },
+    })
 }
 
 fn target_as_value(target: &TargetValue, bit_len: usize) -> Result<Option<FieldValue>> {

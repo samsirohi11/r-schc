@@ -165,8 +165,9 @@ pub enum Cda {
 ///
 /// Matches the `nature-*` identities from the SCHC data model. Existing rules
 /// default to [`RuleNature::Compression`]. Fragmentation is explicitly
-/// unsupported by the core, and no-compression rules are representable but not
-/// processed by the compressor or decompressor.
+/// unsupported by the core. No-compression rules wrap and unwrap the original
+/// packet bytes with the selected rule ID and no compressed residue
+/// transformation.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum RuleNature {
     /// Compression rule.

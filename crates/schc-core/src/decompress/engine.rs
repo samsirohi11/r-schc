@@ -33,25 +33,31 @@ impl Decompressor {
     /// `Position::Core` reconstructs an uplink packet and `Position::Device`
     /// reconstructs a downlink packet.
     ///
+    /// No-compression rules return the packet bytes that follow the rule ID,
+    /// preserving bit order and zero-bit padding exactly.
+    ///
     /// # Errors
     ///
     /// Returns [`SchcError::NoMatchingRule`] when the datagram rule ID does not
     /// match a loaded rule.
     /// Returns [`SchcError::UnsupportedRuleNature`] when the selected rule is a
-    /// no-compression or fragmentation rule.
+    /// fragmentation rule.
     /// Returns [`SchcError::InvalidResidue`] when residue bits are malformed or
     /// cannot be reconstructed into a supported packet.
     pub fn decompress(&self, position: Position, compressed: &[u8]) -> Result<Vec<u8>> {
         let (rule, mut reader) = select_rule(self.context.rules().rules(), compressed)?;
-        if rule.nature() != crate::RuleNature::Compression {
-            return Err(SchcError::UnsupportedRuleNature {
+        match rule.nature() {
+            crate::RuleNature::Compression => {
+                let direction = inverse_direction(position);
+                let fields = decode_fields(rule, direction, &mut reader)?;
+                validate_padding(&mut reader)?;
+                crate::packet::builder::reconstruct_packet(direction, &fields)
+            }
+            crate::RuleNature::NoCompression => decode_no_compression_payload(&mut reader),
+            crate::RuleNature::Fragmentation => Err(SchcError::UnsupportedRuleNature {
                 nature: rule.nature().as_str(),
-            });
+            }),
         }
-        let direction = inverse_direction(position);
-        let fields = decode_fields(rule, direction, &mut reader)?;
-        validate_padding(&mut reader)?;
-        crate::packet::builder::reconstruct_packet(direction, &fields)
     }
 
     /// Returns the rule context used by this decompressor.
@@ -305,6 +311,18 @@ fn validate_padding(reader: &mut BitReader<'_>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Decodes a no-compression payload by reading every full byte that follows
+/// the rule ID. The packet is byte-aligned, so the number of packet bits is
+/// the largest multiple of eight that fits in the remaining bits; the leftover
+/// bits are zero padding and are validated.
+fn decode_no_compression_payload(reader: &mut BitReader<'_>) -> Result<Vec<u8>> {
+    let remaining = reader.remaining();
+    let packet_bits = (remaining / 8) * 8;
+    let packet = reader.read_bytes_padded(packet_bits)?;
+    validate_padding(reader)?;
+    Ok(packet)
 }
 
 #[cfg(test)]

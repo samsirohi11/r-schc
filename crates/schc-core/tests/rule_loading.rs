@@ -106,7 +106,7 @@ fn json_rules_parse_nature_and_option_number_fields() {
 }
 
 #[test]
-fn no_compression_rules_are_representable_but_not_decompressed() {
+fn no_compression_rule_decompresses_to_packet_bytes() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let json = r#"
     {
@@ -120,17 +120,14 @@ fn no_compression_rules_are_representable_but_not_decompressed() {
     "#;
     let context = RuleContext::from_json_str(json, registry).unwrap();
 
-    let error = Decompressor::new(context)
+    // The 4-bit rule ID 0001 is followed by a full packet byte (0x20) and
+    // four zero padding bits: 0001_0010_0000_0000 = 0x12 0x00.
+    let restored = Decompressor::new(context)
         .unwrap()
-        .decompress(Position::Core, &[0x10])
-        .unwrap_err();
+        .decompress(Position::Core, &[0x12, 0x00])
+        .unwrap();
 
-    assert!(matches!(
-        error,
-        SchcError::UnsupportedRuleNature {
-            nature: "no-compression"
-        }
-    ));
+    assert_eq!(restored, [0x20]);
 }
 
 #[test]
