@@ -655,3 +655,161 @@ fn compression_without_payload_field_rejects_packet_with_payload() {
 
     assert!(matches!(error, SchcError::NoMatchingRule));
 }
+
+/// A rule set with two rules that share bidirectional IPv6 and CoAP header
+/// fields but diverge by UDP port direction: rule 1 matches uplink packets,
+/// rule 2 matches downlink packets. Both rules are complete (they account for
+/// every byte of the packet) so the compressor can accept a matching packet.
+fn direction_split_context() -> RuleContext {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [
+        {
+          "rule_id": 1,
+          "rule_id_length": 4,
+          "fields": [
+            { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-trafficclass", "length_bits": 8, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-flowlabel", "length_bits": 20, "direction": "bi", "target": "000000", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-payload-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+            { "field": "fid-ipv6-nextheader", "length_bits": 8, "direction": "bi", "target": "11", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "value-sent" },
+            { "field": "fid-ipv6-devprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-deviid", "length_bits": 64, "direction": "bi", "target": "0000000000000001", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-appprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-appiid", "length_bits": 64, "direction": "bi", "target": "0000000000000002", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-dev-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-app-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+            { "field": "fid-udp-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+            { "field": "fid-coap-version", "length_bits": 2, "direction": "bi", "target": "01", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-coap-type", "length_bits": 2, "direction": "bi", "target": "00", "mo": "ignore", "cda": "value-sent" },
+            { "field": "fid-coap-tkl", "length_bits": 4, "direction": "bi", "target": "00", "mo": "ignore", "cda": "value-sent" },
+            { "field": "fid-coap-code", "length_bits": 8, "direction": "bi", "target": "01", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-coap-mid", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
+          ]
+        },
+        {
+          "rule_id": 2,
+          "rule_id_length": 4,
+          "fields": [
+            { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-trafficclass", "length_bits": 8, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-flowlabel", "length_bits": 20, "direction": "bi", "target": "000000", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-payload-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+            { "field": "fid-ipv6-nextheader", "length_bits": 8, "direction": "bi", "target": "11", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "value-sent" },
+            { "field": "fid-ipv6-devprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-deviid", "length_bits": 64, "direction": "bi", "target": "0000000000000001", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-appprefix", "length_bits": 64, "direction": "bi", "target": "20010db800000000", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-appiid", "length_bits": 64, "direction": "bi", "target": "0000000000000002", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-dev-port", "length_bits": 16, "direction": "down", "target": "1633", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-app-port", "length_bits": 16, "direction": "down", "target": "1633", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+            { "field": "fid-udp-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+            { "field": "fid-coap-version", "length_bits": 2, "direction": "bi", "target": "01", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-coap-type", "length_bits": 2, "direction": "bi", "target": "00", "mo": "ignore", "cda": "value-sent" },
+            { "field": "fid-coap-tkl", "length_bits": 4, "direction": "bi", "target": "00", "mo": "ignore", "cda": "value-sent" },
+            { "field": "fid-coap-code", "length_bits": 8, "direction": "bi", "target": "01", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-coap-mid", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
+          ]
+        }
+      ]
+    }
+    "#;
+    RuleContext::from_json_str(json, registry).unwrap()
+}
+
+/// Uplink IPv6/UDP/CoAP packet: source is the device, destination is the
+/// application. Matches rule 1 of the direction-split context.
+fn direction_split_uplink_packet() -> Vec<u8> {
+    hex::decode(
+        "60000000000c114020010db8000000000000000000000001\
+         20010db800000000000000000000000216331633000c37d0\
+         4001002a",
+    )
+    .unwrap()
+}
+
+/// Downlink IPv6/UDP/CoAP packet: source is the application, destination is
+/// the device. The IPv6 source and destination are swapped relative to the
+/// uplink packet; the UDP ports remain 1633/1633, so the computed UDP checksum
+/// remains valid because the pseudo-header address sum is unchanged. Matches rule 2 of
+/// the direction-split context.
+fn direction_split_downlink_packet() -> Vec<u8> {
+    hex::decode(
+        "60000000000c114020010db8000000000000000000000002\
+         20010db800000000000000000000000116331633000c37d0\
+         4001002a",
+    )
+    .unwrap()
+}
+
+#[test]
+fn direction_split_uplink_selects_uplink_rule() {
+    let context = direction_split_context();
+    let compressor = Compressor::new(context.clone()).unwrap();
+
+    let compressed = compressor
+        .compress(Direction::Up, &direction_split_uplink_packet())
+        .unwrap();
+
+    // The first nibble is the 4-bit rule ID. Uplink must select rule 1.
+    assert_eq!(compressed.bytes()[0] >> 4, 1);
+
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+    assert_eq!(restored, direction_split_uplink_packet());
+}
+
+#[test]
+fn direction_split_downlink_selects_downlink_rule() {
+    let context = direction_split_context();
+    let compressor = Compressor::new(context.clone()).unwrap();
+
+    let compressed = compressor
+        .compress(Direction::Down, &direction_split_downlink_packet())
+        .unwrap();
+
+    // The first nibble is the 4-bit rule ID. Downlink must select rule 2.
+    assert_eq!(compressed.bytes()[0] >> 4, 2);
+
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Device, compressed.bytes())
+        .unwrap();
+    assert_eq!(restored, direction_split_downlink_packet());
+}
+
+#[test]
+fn direction_split_uplink_packet_does_not_match_downlink_rule() {
+    let context = direction_split_context();
+    let compressor = Compressor::new(context).unwrap();
+
+    // The downlink packet must not compress in the uplink direction: the
+    // downlink-only UDP port branches are skipped for Direction::Up, and the
+    // uplink-only branches do not match the swapped addresses.
+    let error = compressor
+        .compress(Direction::Up, &direction_split_downlink_packet())
+        .unwrap_err();
+
+    assert!(matches!(error, SchcError::NoMatchingRule));
+}
+
+#[test]
+fn direction_split_downlink_packet_does_not_match_uplink_rule() {
+    let context = direction_split_context();
+    let compressor = Compressor::new(context).unwrap();
+
+    // The uplink packet must not compress in the downlink direction: the
+    // uplink-only UDP port branches are skipped for Direction::Down, and the
+    // downlink-only branches do not match the swapped addresses.
+    let error = compressor
+        .compress(Direction::Down, &direction_split_uplink_packet())
+        .unwrap_err();
+
+    assert!(matches!(error, SchcError::NoMatchingRule));
+}

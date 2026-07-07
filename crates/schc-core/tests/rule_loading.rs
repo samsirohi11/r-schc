@@ -254,6 +254,168 @@ fn decision_tree_keeps_branches_with_different_next_fields_separate() {
 }
 
 #[test]
+fn decision_tree_keeps_uplink_and_downlink_branches_separate() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [
+        {
+          "rule_id": 1,
+          "rule_id_length": 4,
+          "fields": [
+            { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-dev-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" }
+          ]
+        },
+        {
+          "rule_id": 2,
+          "rule_id_length": 4,
+          "fields": [
+            { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-dev-port", "length_bits": 16, "direction": "down", "target": "1633", "mo": "equal", "cda": "not-sent" }
+          ]
+        }
+      ]
+    }
+    "#;
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+
+    let tree = DecisionTree::build(context.rules()).unwrap();
+
+    // The shared bidirectional IPv6 version field produces one branch at the
+    // root. The UDP device port diverges by direction at depth 1, so the
+    // second-level node must carry two distinct branches: one uplink-only and
+    // one downlink-only. They must not collapse into a single branch.
+    assert_eq!(tree.nodes()[0].branches.len(), 1);
+    let next = tree.nodes()[0].branches[0].next;
+    let divergence = &tree.nodes()[next];
+    assert_eq!(divergence.branches.len(), 2);
+    let directions: Vec<DirectionSelector> =
+        divergence.branches.iter().map(|b| b.direction).collect();
+    assert!(directions.contains(&DirectionSelector::Up));
+    assert!(directions.contains(&DirectionSelector::Down));
+    assert!(!directions.contains(&DirectionSelector::Bidirectional));
+}
+
+#[test]
+fn decision_tree_keeps_bi_branch_distinct_from_directional_branches() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [
+        {
+          "rule_id": 1,
+          "rule_id_length": 4,
+          "fields": [
+            { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "equal", "cda": "not-sent" }
+          ]
+        },
+        {
+          "rule_id": 2,
+          "rule_id_length": 4,
+          "fields": [
+            { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "up", "target": "40", "mo": "equal", "cda": "not-sent" }
+          ]
+        },
+        {
+          "rule_id": 3,
+          "rule_id_length": 4,
+          "fields": [
+            { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "down", "target": "40", "mo": "equal", "cda": "not-sent" }
+          ]
+        }
+      ]
+    }
+    "#;
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+
+    let tree = DecisionTree::build(context.rules()).unwrap();
+
+    // At the divergence depth the bidirectional, uplink-only, and
+    // downlink-only hop-limit branches must remain three distinct branches.
+    // The bidirectional branch is shared by both directions, but it must not
+    // absorb the directional branches.
+    let next = tree.nodes()[0].branches[0].next;
+    let divergence = &tree.nodes()[next];
+    assert_eq!(divergence.branches.len(), 3);
+    let mut directions: Vec<DirectionSelector> =
+        divergence.branches.iter().map(|b| b.direction).collect();
+    directions.sort_by_key(|d| match d {
+        DirectionSelector::Bidirectional => 0,
+        DirectionSelector::Up => 1,
+        DirectionSelector::Down => 2,
+    });
+    assert_eq!(
+        directions,
+        vec![
+            DirectionSelector::Bidirectional,
+            DirectionSelector::Up,
+            DirectionSelector::Down,
+        ]
+    );
+}
+
+#[test]
+fn decision_tree_keeps_direction_split_branches_with_different_next_fields_separate() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [
+        {
+          "rule_id": 1,
+          "rule_id_length": 4,
+          "fields": [
+            { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "up", "target": "40", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-udp-dev-port", "length_bits": 16, "direction": "up", "target": "1633", "mo": "equal", "cda": "not-sent" }
+          ]
+        },
+        {
+          "rule_id": 2,
+          "rule_id_length": 4,
+          "fields": [
+            { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "down", "target": "40", "mo": "equal", "cda": "not-sent" },
+            { "field": "fid-coap-code", "length_bits": 8, "direction": "down", "target": "02", "mo": "equal", "cda": "not-sent" }
+          ]
+        }
+      ]
+    }
+    "#;
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+
+    let tree = DecisionTree::build(context.rules()).unwrap();
+
+    // Both rules share the bidirectional IPv6 version branch. At depth 1 the
+    // hop-limit branches diverge by both direction and next field: rule 1 is
+    // uplink-only leading to a UDP port, rule 2 is downlink-only leading to a
+    // CoAP code. They must remain two distinct branches, not collapse into a
+    // single bidirectional branch.
+    let next = tree.nodes()[0].branches[0].next;
+    let divergence = &tree.nodes()[next];
+    assert_eq!(divergence.branches.len(), 2);
+    let directions: Vec<DirectionSelector> =
+        divergence.branches.iter().map(|b| b.direction).collect();
+    assert!(directions.contains(&DirectionSelector::Up));
+    assert!(directions.contains(&DirectionSelector::Down));
+    // The uplink branch leads toward a UDP port, the downlink branch toward a
+    // CoAP code. Each branch targets a distinct next field.
+    for branch in &divergence.branches {
+        let leaf = &tree.nodes()[branch.next];
+        if branch.direction == DirectionSelector::Up {
+            assert_eq!(leaf.branches.len(), 1);
+            assert_eq!(leaf.branches[0].parse.field, FieldRef::Udp("fid-udp-dev-port"));
+        } else {
+            assert_eq!(leaf.branches.len(), 1);
+            assert_eq!(leaf.branches[0].parse.field, FieldRef::Coap("fid-coap-code"));
+        }
+    }
+}
+
+#[test]
 fn cbor_rules_load_into_typed_context() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let root = map(vec![(
