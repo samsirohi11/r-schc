@@ -198,9 +198,7 @@ fn no_compression_datagram_with_only_padding_returns_empty_packet() {
     // A 4-bit rule ID followed by four zero padding bits, with no packet bytes.
     let datagram = [0x30];
 
-    let restored = decompressor
-        .decompress(Position::Core, &datagram)
-        .unwrap();
+    let restored = decompressor.decompress(Position::Core, &datagram).unwrap();
 
     assert!(restored.is_empty());
 }
@@ -852,9 +850,7 @@ fn decompressor_rejects_nonzero_sub_byte_padding() {
     let mut bytes = compressed.bytes().to_vec();
     *bytes.last_mut().unwrap() |= 0x01;
 
-    let error = decompressor
-        .decompress(Position::Core, &bytes)
-        .unwrap_err();
+    let error = decompressor.decompress(Position::Core, &bytes).unwrap_err();
 
     assert!(matches!(error, SchcError::InvalidResidue(_)));
 }
@@ -1101,7 +1097,9 @@ fn fragmentation_rule_remains_unsupported_for_decompression() {
     let context = RuleContext::from_json_str(json, registry).unwrap();
     let decompressor = Decompressor::new(context).unwrap();
 
-    let error = decompressor.decompress(Position::Core, &[0x01]).unwrap_err();
+    let error = decompressor
+        .decompress(Position::Core, &[0x01])
+        .unwrap_err();
 
     assert!(matches!(
         error,

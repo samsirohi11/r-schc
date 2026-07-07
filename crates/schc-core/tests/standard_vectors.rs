@@ -26,10 +26,7 @@ fn sid_fixture() -> &'static str {
 }
 
 fn rule_fixture(name: &str) -> String {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/rules/"
-    );
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/rules/");
     std::fs::read_to_string(format!("{path}{name}")).unwrap()
 }
 
@@ -58,8 +55,7 @@ mod udp_coap_get {
     use super::*;
 
     const RULE: &str = "udp_coap.json";
-    const PACKET_HEX: &str =
-        "60000000000c114020010db8000000000000000000000001\
+    const PACKET_HEX: &str = "60000000000c114020010db8000000000000000000000001\
          20010db800000000000000000000000216331633000c37d0\
          4001002a";
     const COMPRESSED_HEX: &str = "3400000a80";
@@ -106,8 +102,7 @@ mod udp_coap_get {
 mod udp_coap_token {
     use super::*;
 
-    const PACKET_HEX: &str =
-        "60000000000e114020010db8000000000000000000000001\
+    const PACKET_HEX: &str = "60000000000e114020010db8000000000000000000000001\
          20010db800000000000000000000000216331633000e7905\
          42021234aabb";
     const COMPRESSED_HEX: &str = "4400848d2aaec0";
@@ -187,8 +182,7 @@ mod udp_payload_residue {
     use super::*;
 
     const RULE: &str = "udp_payload.json";
-    const PACKET_HEX: &str =
-        "60000000000d114020010db8000000000000000000000001\
+    const PACKET_HEX: &str = "60000000000d114020010db8000000000000000000000001\
          20010db800000000000000000000000216331633000d3427\
          68656c6c6f";
     const COMPRESSED_HEX: &str = "840568656c6c6f";
@@ -238,8 +232,7 @@ mod coap_path_payload {
     use super::*;
 
     const RULE: &str = "dynamic_coap.json";
-    const PACKET_HEX: &str =
-        "600000000018114020010db8000000000000000000000001\
+    const PACKET_HEX: &str = "600000000018114020010db8000000000000000000000001\
          20010db80000000000000000000000021633163300188da9\
          42021234aabbb474656d70ff32312e35";
     const COMPRESSED_HEX: &str = "4400848d2aaed0c8c4b8d4";
@@ -290,8 +283,7 @@ mod coap_option_by_number {
     use super::*;
 
     const RULE: &str = "coap_option_by_number.json";
-    const PACKET_HEX: &str =
-        "600000000017114020010db8000000000000000000000001\
+    const PACKET_HEX: &str = "600000000017114020010db8000000000000000000000001\
          20010db800000000000000000000000216331633001750a1\
          42011234aabbb163118eff32312e35";
     const COMPRESSED_HEX: &str = "6400848d2aaed432312e35";
@@ -339,8 +331,7 @@ mod icmpv6_echo {
     use super::*;
 
     const RULE: &str = "icmpv6_echo.json";
-    const PACKET_HEX: &str =
-        "60000000000c3a4020010db8000000000000000000000001\
+    const PACKET_HEX: &str = "60000000000c3a4020010db8000000000000000000000001\
          20010db80000000000000000000000028000333e12340001\
          70696e67";
     const COMPRESSED_HEX: &str = "94081234000170696e67";
@@ -388,8 +379,7 @@ mod icmpv6_echo {
 mod icmpv6_error_embedded {
     use super::*;
 
-    const PACKET_HEX: &str =
-        "6000000000383aff20010db8000000000000000000000002\
+    const PACKET_HEX: &str = "6000000000383aff20010db8000000000000000000000002\
          20010db80000000000000000000000010104312600000000\
          60000000000811ff20010db8000000000000000000000001\
          20010db80000000000000000000000021633163300087803";
@@ -479,8 +469,7 @@ mod udp_payload_sent_checksum {
     use super::*;
 
     const RULE: &str = "udp_payload.json";
-    const PACKET_HEX: &str =
-        "60000000000d114020010db8000000000000000000000001\
+    const PACKET_HEX: &str = "60000000000d114020010db8000000000000000000000001\
          20010db800000000000000000000000216331633000d3427\
          68656c6c6f";
     const COMPRESSED_HEX: &str = "8401234568656c6c6f";

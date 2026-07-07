@@ -181,11 +181,9 @@ impl Compressor {
                         }
                     }
                 }
-                RuleNature::NoCompression => candidates.push(no_compression_candidate(
-                    rule_order,
-                    rule_id,
-                    packet,
-                )?),
+                RuleNature::NoCompression => {
+                    candidates.push(no_compression_candidate(rule_order, rule_id, packet)?);
+                }
                 RuleNature::Fragmentation => nature_errors.push(nature),
             }
         }

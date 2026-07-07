@@ -404,10 +404,16 @@ fn decision_tree_keeps_direction_split_branches_with_different_next_fields_separ
         let leaf = &tree.nodes()[branch.next];
         if branch.direction == DirectionSelector::Up {
             assert_eq!(leaf.branches.len(), 1);
-            assert_eq!(leaf.branches[0].parse.field, FieldRef::Udp("fid-udp-dev-port"));
+            assert_eq!(
+                leaf.branches[0].parse.field,
+                FieldRef::Udp("fid-udp-dev-port")
+            );
         } else {
             assert_eq!(leaf.branches.len(), 1);
-            assert_eq!(leaf.branches[0].parse.field, FieldRef::Coap("fid-coap-code"));
+            assert_eq!(
+                leaf.branches[0].parse.field,
+                FieldRef::Coap("fid-coap-code")
+            );
         }
     }
 }
@@ -860,30 +866,26 @@ fn cbor_rule_id_rejects_prefix_collision() {
     // CORECONF CBOR rule metadata keys: key 1 = rule ID length, key 2 = rule ID
     // value, key 3 = rule nature, key 23 = entries. Two rules whose IDs collide:
     // binary `1` (1 bit) is a bit-prefix of binary `10` (2 bits).
-    let root = map(vec![
-        (
-            int(2574),
-            map(vec![
-                (
-                    int(23),
-                    array(vec![
-                        map(vec![
-                            (int(1), int(1)),
-                            (int(2), int(1)),
-                            (int(3), int(2941)),
-                            (int(23), array(vec![])),
-                        ]),
-                        map(vec![
-                            (int(1), int(2)),
-                            (int(2), int(2)),
-                            (int(3), int(2941)),
-                            (int(23), array(vec![])),
-                        ]),
-                    ]),
-                ),
+    let root = map(vec![(
+        int(2574),
+        map(vec![(
+            int(23),
+            array(vec![
+                map(vec![
+                    (int(1), int(1)),
+                    (int(2), int(1)),
+                    (int(3), int(2941)),
+                    (int(23), array(vec![])),
+                ]),
+                map(vec![
+                    (int(1), int(2)),
+                    (int(2), int(2)),
+                    (int(3), int(2941)),
+                    (int(23), array(vec![])),
+                ]),
             ]),
-        ),
-    ]);
+        )]),
+    )]);
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
 
@@ -976,7 +978,10 @@ fn field_error_includes_rule_entry_and_cda_name_for_mapping_sent() {
         .unwrap_err()
         .to_string();
 
-    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("rule=0"),
+        "must name rule index, got: {message}"
+    );
     assert!(
         message.contains("entry=0"),
         "must name entry index, got: {message}"
@@ -1013,7 +1018,10 @@ fn field_error_includes_rule_entry_and_cda_mo_names_for_lsb() {
         .unwrap_err()
         .to_string();
 
-    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("rule=0"),
+        "must name rule index, got: {message}"
+    );
     assert!(
         message.contains("entry=0"),
         "must name entry index, got: {message}"
@@ -1047,7 +1055,10 @@ fn field_error_includes_rule_entry_and_field_name_for_compute() {
         .unwrap_err()
         .to_string();
 
-    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("rule=0"),
+        "must name rule index, got: {message}"
+    );
     assert!(
         message.contains("entry=0"),
         "must name entry index, got: {message}"
@@ -1084,7 +1095,10 @@ fn field_error_includes_rule_entry_and_marker_constraint() {
         .unwrap_err()
         .to_string();
 
-    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("rule=0"),
+        "must name rule index, got: {message}"
+    );
     assert!(
         message.contains("entry=0"),
         "must name entry index, got: {message}"
@@ -1124,7 +1138,10 @@ fn field_error_includes_rule_entry_and_unknown_cda_name() {
         .unwrap_err()
         .to_string();
 
-    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("rule=0"),
+        "must name rule index, got: {message}"
+    );
     assert!(
         message.contains("entry=0"),
         "must name entry index, got: {message}"
@@ -1156,7 +1173,10 @@ fn field_error_includes_rule_entry_and_unknown_mo_name() {
         .unwrap_err()
         .to_string();
 
-    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("rule=0"),
+        "must name rule index, got: {message}"
+    );
     assert!(
         message.contains("entry=0"),
         "must name entry index, got: {message}"

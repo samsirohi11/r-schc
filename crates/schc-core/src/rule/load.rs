@@ -554,7 +554,6 @@ fn load_cbor_coreconf_field(
     Ok(rule)
 }
 
-
 fn load_cbor_universal_option_field(
     sid_registry: &SidRegistry,
     rule_index: usize,
