@@ -730,15 +730,29 @@ fn json_rule_id_rejects_prefix_collision() {
     }
     "#;
 
+    let error = RuleContext::from_json_str(json, registry).unwrap_err();
     assert!(matches!(
-        RuleContext::from_json_str(json, registry),
-        Err(SchcError::AmbiguousRuleIdPrefix {
+        &error,
+        SchcError::AmbiguousRuleIdPrefix {
             first_value: 1,
             first_bits: 1,
             second_value: 2,
             second_bits: 2
-        })
+        }
     ));
+    let message = error.to_string();
+    assert!(
+        message.contains("ambiguous rule ID prefix"),
+        "error must identify the ambiguity, got: {message}"
+    );
+    assert!(
+        message.contains("rule ID 1 (1 bits)"),
+        "error must name the prefix rule ID, got: {message}"
+    );
+    assert!(
+        message.contains("rule ID 2 (2 bits)"),
+        "error must name the longer rule ID, got: {message}"
+    );
 }
 
 #[test]
@@ -755,15 +769,29 @@ fn json_rule_id_reports_shorter_prefix_first_when_longer_id_appears_first() {
     }
     "#;
 
+    let error = RuleContext::from_json_str(json, registry).unwrap_err();
     assert!(matches!(
-        RuleContext::from_json_str(json, registry),
-        Err(SchcError::AmbiguousRuleIdPrefix {
+        &error,
+        SchcError::AmbiguousRuleIdPrefix {
             first_value: 1,
             first_bits: 1,
             second_value: 2,
             second_bits: 2
-        })
+        }
     ));
+    let message = error.to_string();
+    assert!(
+        message.contains("ambiguous rule ID prefix"),
+        "error must identify the ambiguity, got: {message}"
+    );
+    assert!(
+        message.contains("rule ID 1 (1 bits)"),
+        "error must name the prefix rule ID, got: {message}"
+    );
+    assert!(
+        message.contains("rule ID 2 (2 bits)"),
+        "error must name the longer rule ID, got: {message}"
+    );
 }
 
 #[test]
@@ -779,15 +807,25 @@ fn json_rule_id_rejects_exact_duplicate() {
     }
     "#;
 
+    let error = RuleContext::from_json_str(json, registry).unwrap_err();
     assert!(matches!(
-        RuleContext::from_json_str(json, registry),
-        Err(SchcError::AmbiguousRuleIdPrefix {
+        &error,
+        SchcError::AmbiguousRuleIdPrefix {
             first_value: 5,
             first_bits: 3,
             second_value: 5,
             second_bits: 3
-        })
+        }
     ));
+    let message = error.to_string();
+    assert!(
+        message.contains("ambiguous rule ID prefix"),
+        "error must identify the ambiguity, got: {message}"
+    );
+    assert!(
+        message.contains("rule ID 5 (3 bits)"),
+        "error must name the duplicate rule ID, got: {message}"
+    );
 }
 
 #[test]
@@ -849,15 +887,29 @@ fn cbor_rule_id_rejects_prefix_collision() {
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
 
+    let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
     assert!(matches!(
-        RuleContext::from_cbor_slice(&cbor, registry),
-        Err(SchcError::AmbiguousRuleIdPrefix {
+        &error,
+        SchcError::AmbiguousRuleIdPrefix {
             first_value: 1,
             first_bits: 1,
             second_value: 2,
             second_bits: 2
-        })
+        }
     ));
+    let message = error.to_string();
+    assert!(
+        message.contains("ambiguous rule ID prefix"),
+        "error must identify the ambiguity, got: {message}"
+    );
+    assert!(
+        message.contains("rule ID 1 (1 bits)"),
+        "error must name the prefix rule ID, got: {message}"
+    );
+    assert!(
+        message.contains("rule ID 2 (2 bits)"),
+        "error must name the longer rule ID, got: {message}"
+    );
 }
 
 #[test]
@@ -900,4 +952,217 @@ fn json_rule_rejects_lsb_without_msb() {
         RuleContext::from_json_str(json, registry),
         Err(SchcError::InvalidRuleField { .. })
     ));
+}
+
+/// Asserts that an invalid CDA/MO combination error message includes the
+/// rule index, entry index, and names the CDA (`mapping-sent`) and the
+/// missing requirement (a mapping target).
+#[test]
+fn field_error_includes_rule_entry_and_cda_name_for_mapping_sent() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "mapping-sent" }
+        ]
+      }]
+    }
+    "#;
+
+    let message = RuleContext::from_json_str(json, registry)
+        .unwrap_err()
+        .to_string();
+
+    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("entry=0"),
+        "must name entry index, got: {message}"
+    );
+    assert!(
+        message.contains("mapping-sent"),
+        "must name the CDA, got: {message}"
+    );
+    assert!(
+        message.contains("mapping target"),
+        "must name the missing requirement, got: {message}"
+    );
+}
+
+/// Asserts that an `lsb`-without-`msb` error message includes the rule index,
+/// entry index, and names both the CDA (`lsb`) and the matching operator
+/// (`msb`).
+#[test]
+fn field_error_includes_rule_entry_and_cda_mo_names_for_lsb() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": "40", "mo": "ignore", "cda": "lsb" }
+        ]
+      }]
+    }
+    "#;
+
+    let message = RuleContext::from_json_str(json, registry)
+        .unwrap_err()
+        .to_string();
+
+    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("entry=0"),
+        "must name entry index, got: {message}"
+    );
+    assert!(message.contains("lsb"), "must name the CDA, got: {message}");
+    assert!(
+        message.contains("msb"),
+        "must name the matching operator, got: {message}"
+    );
+}
+
+/// Asserts that a `compute`-for-non-computable-field error message includes
+/// the rule index, entry index, the CDA name (`compute`), and the field
+/// identifier.
+#[test]
+fn field_error_includes_rule_entry_and_field_name_for_compute() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" }
+        ]
+      }]
+    }
+    "#;
+
+    let message = RuleContext::from_json_str(json, registry)
+        .unwrap_err()
+        .to_string();
+
+    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("entry=0"),
+        "must name entry index, got: {message}"
+    );
+    assert!(
+        message.contains("compute"),
+        "must name the CDA, got: {message}"
+    );
+    assert!(
+        message.contains("fid-ipv6-hoplimit"),
+        "must name the field identifier, got: {message}"
+    );
+}
+
+/// Asserts that a CoAP payload marker misuse error message includes the rule
+/// index, entry index, and identifies the marker field and the required
+/// CDA/MO combination.
+#[test]
+fn field_error_includes_rule_entry_and_marker_constraint() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-coap-payload-marker", "length_bits": 0, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
+        ]
+      }]
+    }
+    "#;
+
+    let message = RuleContext::from_json_str(json, registry)
+        .unwrap_err()
+        .to_string();
+
+    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("entry=0"),
+        "must name entry index, got: {message}"
+    );
+    assert!(
+        message.contains("CoAP payload marker"),
+        "must identify the marker field, got: {message}"
+    );
+    assert!(
+        message.contains("not-sent"),
+        "must name the required CDA, got: {message}"
+    );
+    assert!(
+        message.contains("ignore"),
+        "must name the required matching operator, got: {message}"
+    );
+}
+
+/// Asserts that an unknown CDA string error message includes the rule index,
+/// entry index, and names the unknown CDA value.
+#[test]
+fn field_error_includes_rule_entry_and_unknown_cda_name() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": null, "mo": "ignore", "cda": "bogus-cda" }
+        ]
+      }]
+    }
+    "#;
+
+    let message = RuleContext::from_json_str(json, registry)
+        .unwrap_err()
+        .to_string();
+
+    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("entry=0"),
+        "must name entry index, got: {message}"
+    );
+    assert!(
+        message.contains("bogus-cda"),
+        "must name the unknown CDA, got: {message}"
+    );
+}
+
+/// Asserts that an unknown matching operator string error message includes
+/// the rule index, entry index, and names the unknown MO value.
+#[test]
+fn field_error_includes_rule_entry_and_unknown_mo_name() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": null, "mo": "bogus-mo", "cda": "value-sent" }
+        ]
+      }]
+    }
+    "#;
+
+    let message = RuleContext::from_json_str(json, registry)
+        .unwrap_err()
+        .to_string();
+
+    assert!(message.contains("rule=0"), "must name rule index, got: {message}");
+    assert!(
+        message.contains("entry=0"),
+        "must name entry index, got: {message}"
+    );
+    assert!(
+        message.contains("bogus-mo"),
+        "must name the unknown MO, got: {message}"
+    );
 }

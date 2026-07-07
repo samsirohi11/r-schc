@@ -11,8 +11,8 @@
 //! `type` field).
 
 use schc_core::{
-    Cda, DirectionSelector, FieldLength, FieldRef, MatchingOperator, RuleContext, SchcError,
-    SidRegistry,
+    Cda, Decompressor, DirectionSelector, FieldLength, FieldRef, MatchingOperator, Position,
+    RuleContext, SchcError, SidRegistry,
 };
 
 fn ietf_schc_sid_fixture() -> &'static str {
@@ -218,6 +218,46 @@ fn json_rule_loads_with_ietf_schc_sid_file_supported_identities() {
     assert_eq!(rule.fields()[1].action, Cda::Compute);
     assert_eq!(rule.fields()[1].matching, MatchingOperator::Ignore);
     assert_eq!(rule.fields()[1].direction, DirectionSelector::Bidirectional);
+}
+
+/// Asserts that decompressing a rule whose field length references an
+/// unsupported field-length function SID produces an error that names the
+/// SID and identifies the field-length operation.
+#[test]
+fn decompress_rejects_unsupported_field_length_function_sid() {
+    let registry = SidRegistry::load_path(ietf_schc_sid_fixture()).unwrap();
+    // SID 9999 is not present in the IETF SCHC SID file, so the field-length
+    // function is preserved as an unresolved `FunctionSid` at load time and
+    // must produce an explicit error at decompression time.
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-version", "length": { "type": "function-sid", "sid": 9999 }, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" }
+        ]
+      }]
+    }
+    "#;
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    // 0001 = rule ID 1, then zero padding. The not-sent field with a
+    // function-sid length triggers length resolution, which must fail.
+    let message = decompressor
+        .decompress(Position::Core, &[0x10])
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        message.contains("field-length function"),
+        "error must identify the field-length operation, got: {message}"
+    );
+    assert!(
+        message.contains("9999"),
+        "error must name the unsupported SID, got: {message}"
+    );
 }
 
 fn error_reason(error: &SchcError) -> String {

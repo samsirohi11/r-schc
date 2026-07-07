@@ -1110,3 +1110,136 @@ fn fragmentation_rule_remains_unsupported_for_decompression() {
         }
     ));
 }
+
+/// Asserts that the unsupported-fragmentation error display text identifies
+/// the rule nature as fragmentation for both compression and decompression.
+#[test]
+fn fragmentation_unsupported_error_identifies_nature() {
+    let registry = SidRegistry::default();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 8,
+        "nature": "fragmentation",
+        "fields": []
+      }]
+    }
+    "#;
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+
+    let compress_message = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &coap_get_packet())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        compress_message.contains("fragmentation"),
+        "compression error must identify the nature, got: {compress_message}"
+    );
+    assert!(
+        compress_message.contains("unsupported rule nature"),
+        "compression error must identify the operation, got: {compress_message}"
+    );
+
+    let decompress_message = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, &[0x01])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        decompress_message.contains("fragmentation"),
+        "decompression error must identify the nature, got: {decompress_message}"
+    );
+    assert!(
+        decompress_message.contains("unsupported rule nature"),
+        "decompression error must identify the operation, got: {decompress_message}"
+    );
+}
+
+/// Asserts that a non-zero sub-byte padding error message identifies the
+/// padding operation rather than a generic residue failure.
+#[test]
+fn nonzero_padding_error_identifies_padding() {
+    let context = no_compression_non_byte_aligned_context();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    // 4-bit rule ID (0011) followed by four nonzero padding bits (1111).
+    let message = decompressor
+        .decompress(Position::Core, &[0x3f])
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        message.contains("padding"),
+        "error must identify the padding operation, got: {message}"
+    );
+}
+
+/// Asserts that a trailing-residue error message identifies the residue
+/// and names the bit count.
+#[test]
+fn trailing_residue_error_identifies_residue_and_count() {
+    let context = context();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    let mut compressed = compressor()
+        .compress(Direction::Up, &coap_get_packet())
+        .unwrap()
+        .bytes()
+        .to_vec();
+    compressed.push(0xaa);
+
+    let message = decompressor
+        .decompress(Position::Core, &compressed)
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        message.contains("residue"),
+        "error must identify the residue operation, got: {message}"
+    );
+    assert!(
+        message.contains("14"),
+        "error must name the trailing bit count, got: {message}"
+    );
+}
+
+/// Asserts that a mapping-index-out-of-range error message identifies the
+/// mapping operation and names the offending index.
+#[test]
+fn mapping_index_error_identifies_mapping_and_index() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    // Rule ID 1 (4 bits) with a single mapping-sent field carrying a 3-entry
+    // mapping. The index is encoded in 2 bits, so sending 0b11 (index 3) is
+    // out of range for three entries (indices 0, 1, 2).
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 1,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-hoplimit", "length_bits": 8, "direction": "bi", "target": ["40", "41", "42"], "mo": "match-mapping", "cda": "mapping-sent" }
+        ]
+      }]
+    }
+    "#;
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    // 0001 = rule ID 1, then 11 = mapping index 3 (out of range), then 0000
+    // padding.
+    let message = decompressor
+        .decompress(Position::Core, &[0x1c, 0x00])
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        message.contains("mapping"),
+        "error must identify the mapping operation, got: {message}"
+    );
+    assert!(
+        message.contains("index 3"),
+        "error must name the out-of-range index, got: {message}"
+    );
+}
