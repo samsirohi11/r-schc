@@ -1,6 +1,6 @@
 //! JSON and CBOR loading for typed SCHC rules.
 
-use std::{io::Cursor, mem::size_of};
+use std::{collections::BTreeSet, io::Cursor, mem::size_of};
 
 use ciborium::value::Value;
 use serde::Deserialize;
@@ -177,6 +177,7 @@ impl RuleContext {
                     entry_value,
                 )?);
             }
+            normalize_cbor_fields(rule_index, &mut fields)?;
 
             rules.push(Rule::new_with_nature(
                 RuleId::new(rule_id, rule_id_length),
@@ -323,11 +324,44 @@ fn is_compute_supported(field: &FieldRef) -> bool {
 ///   (length or transport checksum fields).
 /// - the CoAP payload marker sentinel must use `not-sent` with `ignore`.
 fn validate_field_rule(rule_index: usize, field: &FieldRule) -> Result<()> {
-    if field.action == Cda::MappingSent && !matches!(field.target, TargetValue::Mapping(_)) {
+    let is_marker = matches!(field.field, FieldRef::SyntheticCoapMarker);
+    if matches!(
+        field.matching,
+        MatchingOperator::Equal | MatchingOperator::Msb(_)
+    ) && !matches!(field.target, TargetValue::Bytes(_))
+    {
         return Err(invalid_field(
             rule_index,
             field.entry_index,
-            "mapping-sent requires a mapping target".to_owned(),
+            "equal and msb matching require a byte target".to_owned(),
+        ));
+    }
+    if field.matching == MatchingOperator::MatchMapping
+        && !matches!(field.target, TargetValue::Mapping(ref values) if !values.is_empty())
+    {
+        return Err(invalid_field(
+            rule_index,
+            field.entry_index,
+            "match-mapping requires a non-empty mapping target".to_owned(),
+        ));
+    }
+    if field.action == Cda::MappingSent
+        && !matches!(field.target, TargetValue::Mapping(ref values) if !values.is_empty())
+    {
+        return Err(invalid_field(
+            rule_index,
+            field.entry_index,
+            "mapping-sent requires a non-empty mapping target".to_owned(),
+        ));
+    }
+    if matches!(field.action, Cda::NotSent | Cda::Lsb)
+        && !is_marker
+        && !matches!(field.target, TargetValue::Bytes(_))
+    {
+        return Err(invalid_field(
+            rule_index,
+            field.entry_index,
+            "not-sent and lsb require a byte target".to_owned(),
         ));
     }
     if field.action == Cda::Lsb && !matches!(field.matching, MatchingOperator::Msb(_)) {
@@ -407,9 +441,9 @@ fn load_field(
 ///
 /// Returns the option number when `value` matches the universal option-by-number
 /// form, which does not require a per-option SID registry entry.
-fn parse_coap_option_field(value: &str) -> Option<u16> {
+fn parse_coap_option_field(value: &str) -> Option<u64> {
     let inner = value.strip_prefix("coap-option(")?.strip_suffix(')')?;
-    let number = inner.parse::<u16>().ok()?;
+    let number = inner.parse::<u64>().ok()?;
     Some(number)
 }
 
@@ -467,11 +501,39 @@ fn load_cbor_field(
     entry_order: usize,
     value: &Value,
 ) -> Result<FieldRule> {
-    if map_value(value, -5).is_some() {
-        load_cbor_universal_option_field(sid_registry, rule_index, entry_order, value)
-    } else {
-        load_cbor_normal_field(sid_registry, rule_index, entry_order, value)
+    let has_field_id = map_value(value, 2).is_some();
+    let has_space_id = map_value(value, 3).is_some();
+    let has_universal_value = map_value(value, 4).is_some();
+
+    match (has_field_id, has_space_id, has_universal_value) {
+        (true, false, false) => {
+            load_cbor_normal_field(sid_registry, rule_index, entry_order, value)
+        }
+        (false, true, true) => {
+            load_cbor_universal_option_field(sid_registry, rule_index, entry_order, value)
+        }
+        _ => Err(invalid_field(
+            rule_index,
+            entry_order,
+            "entry must contain either field-id key 2 or both space-id key 3 and universal-value key 4"
+                .to_owned(),
+        )),
     }
+}
+
+fn normalize_cbor_fields(rule_index: usize, fields: &mut [FieldRule]) -> Result<()> {
+    let mut indexes = BTreeSet::new();
+    for field in fields.iter() {
+        if !indexes.insert(field.entry_index) {
+            return Err(invalid_field(
+                rule_index,
+                field.entry_index,
+                format!("duplicate field entry index {}", field.entry_index),
+            ));
+        }
+    }
+    fields.sort_by_key(|field| field.entry_index);
+    Ok(())
 }
 
 fn load_cbor_normal_field(
@@ -521,11 +583,6 @@ fn load_cbor_coreconf_field(
         required_field_u64(value, 7, rule_index, entry_order)?,
     )?;
     let field_position = required_field_usize(value, 8, rule_index, entry_order)?;
-    let target = cbor_target_value(
-        required_field_value(value, 9, rule_index, entry_order)?,
-        rule_index,
-        entry_order,
-    )?;
     let matching = cbor_matching_operator(
         sid_registry,
         rule_index,
@@ -538,6 +595,13 @@ fn load_cbor_coreconf_field(
         rule_index,
         entry_order,
         required_field_u64(value, 16, rule_index, entry_order)?,
+    )?;
+    let target = cbor_target_value(
+        map_value(value, 9),
+        matching,
+        action,
+        rule_index,
+        entry_order,
     )?;
 
     let rule = FieldRule {
@@ -560,13 +624,30 @@ fn load_cbor_universal_option_field(
     entry_order: usize,
     value: &Value,
 ) -> Result<FieldRule> {
-    let entry_index = required_field_usize(value, -1, rule_index, entry_order)?;
-    let option_number = required_field_u16(value, -5, rule_index, entry_order)?;
+    let entry_index = required_field_usize(value, 1, rule_index, entry_order)?;
+    let space_sid = required_field_u64(value, 3, rule_index, entry_order)?;
+    let space_identifier = sid_identifier(
+        sid_registry,
+        rule_index,
+        entry_order,
+        "universal field space",
+        space_sid,
+    )?;
+    if space_identifier != "space-id-coap" {
+        return Err(invalid_field(
+            rule_index,
+            entry_order,
+            format!(
+                "unsupported universal field space SID {space_sid} identifier {space_identifier}"
+            ),
+        ));
+    }
+    let option_number = required_field_u64(value, 4, rule_index, entry_order)?;
     let length = cbor_field_length(
         sid_registry,
         value,
-        -11,
-        map_value(value, -6),
+        5,
+        map_value(value, 6),
         rule_index,
         entry_order,
     )?;
@@ -574,26 +655,28 @@ fn load_cbor_universal_option_field(
         sid_registry,
         rule_index,
         entry_order,
-        required_field_u64(value, -12, rule_index, entry_order)?,
+        required_field_u64(value, 7, rule_index, entry_order)?,
     )?;
-    let field_position = required_field_usize(value, -10, rule_index, entry_order)?;
-    let target = cbor_target_value(
-        required_field_value(value, -3, rule_index, entry_order)?,
-        rule_index,
-        entry_order,
-    )?;
+    let field_position = required_field_usize(value, 8, rule_index, entry_order)?;
     let matching = cbor_matching_operator(
         sid_registry,
         rule_index,
         entry_order,
-        required_field_u64(value, -9, rule_index, entry_order)?,
-        map_value(value, -8),
+        required_field_u64(value, 12, rule_index, entry_order)?,
+        map_value(value, 13),
     )?;
     let action = cbor_cda(
         sid_registry,
         rule_index,
         entry_order,
-        required_field_u64(value, -16, rule_index, entry_order)?,
+        required_field_u64(value, 16, rule_index, entry_order)?,
+    )?;
+    let target = cbor_target_value(
+        map_value(value, 9),
+        matching,
+        action,
+        rule_index,
+        entry_order,
     )?;
 
     let rule = FieldRule {
@@ -797,22 +880,36 @@ fn cbor_cda(
     }
 }
 
-fn cbor_target_value(value: &Value, rule_index: usize, entry_index: usize) -> Result<TargetValue> {
+fn cbor_target_value(
+    value: Option<&Value>,
+    matching: MatchingOperator,
+    action: Cda,
+    rule_index: usize,
+    entry_index: usize,
+) -> Result<TargetValue> {
+    let Some(value) = value else {
+        return Ok(TargetValue::None);
+    };
     if matches!(value, Value::Null) {
         return Ok(TargetValue::None);
     }
 
-    let mut entries = cbor_target_entries(value, rule_index, entry_index)?;
-    entries.sort_by_key(|(index, _)| *index);
+    let entries = cbor_target_entries(value, rule_index, entry_index)?;
     let mut values = Vec::with_capacity(entries.len());
     for (_, value) in entries {
         values.push(value_to_bytes(value, rule_index, entry_index)?);
     }
 
-    match values.len() {
-        0 => Ok(TargetValue::None),
-        1 => Ok(TargetValue::Bytes(values.remove(0))),
-        _ => Ok(TargetValue::Mapping(values)),
+    if values.is_empty() {
+        return Ok(TargetValue::None);
+    }
+    if matches!(matching, MatchingOperator::MatchMapping) || action == Cda::MappingSent {
+        return Ok(TargetValue::Mapping(values));
+    }
+    if values.len() == 1 {
+        Ok(TargetValue::Bytes(values.remove(0)))
+    } else {
+        Ok(TargetValue::Mapping(values))
     }
 }
 
@@ -831,8 +928,27 @@ fn cbor_target_entries(
     let mut parsed = Vec::with_capacity(entries.len());
     for entry in entries {
         let index = required_field_usize(entry, 1, rule_index, entry_index)?;
+        if parsed.iter().any(|(previous, _)| *previous == index) {
+            return Err(invalid_field(
+                rule_index,
+                entry_index,
+                format!("duplicate target index {index}"),
+            ));
+        }
         let value = required_field_value(entry, 2, rule_index, entry_index)?;
         parsed.push((index, value));
+    }
+    parsed.sort_by_key(|(index, _)| *index);
+    for (expected, (actual, _)) in parsed.iter().enumerate() {
+        if *actual != expected {
+            return Err(invalid_field(
+                rule_index,
+                entry_index,
+                format!(
+                    "value-list indexes must be consecutive from 0; expected {expected}, found {actual}"
+                ),
+            ));
+        }
     }
     Ok(parsed)
 }
@@ -919,21 +1035,6 @@ fn required_field_usize(
     })
 }
 
-fn required_field_u16(
-    value: &Value,
-    key: i128,
-    rule_index: usize,
-    entry_index: usize,
-) -> Result<u16> {
-    value_to_u16(required_field_value(value, key, rule_index, entry_index)?).map_err(|reason| {
-        invalid_field(
-            rule_index,
-            entry_index,
-            format!("key {key} must be a u16 integer: {reason}"),
-        )
-    })
-}
-
 fn required_field_u64(
     value: &Value,
     key: i128,
@@ -990,13 +1091,6 @@ fn value_to_usize(value: &Value) -> core::result::Result<usize, String> {
         return Err("value is not an integer".to_owned());
     };
     usize::try_from(*integer).map_err(|error| error.to_string())
-}
-
-fn value_to_u16(value: &Value) -> core::result::Result<u16, String> {
-    let Value::Integer(integer) = value else {
-        return Err("value is not an integer".to_owned());
-    };
-    u16::try_from(*integer).map_err(|error| error.to_string())
 }
 
 fn value_to_u64(value: &Value) -> core::result::Result<u64, String> {

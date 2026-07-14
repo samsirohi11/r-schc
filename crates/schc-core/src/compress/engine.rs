@@ -528,7 +528,7 @@ fn extract_field(
                 .options()
                 .iter()
                 .skip(coap_option_index)
-                .find(|candidate| candidate.number() == u32::from(*number))
+                .find(|candidate| u64::from(candidate.number()) == *number)
                 .ok_or(SchcError::NoMatchingRule)?;
             FieldValue::from_bytes(option.value().to_vec(), option.value().len() * 8)
         }

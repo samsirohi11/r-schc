@@ -82,8 +82,8 @@ pub enum FieldRef {
     Icmpv6(&'static str),
     /// CoAP option field identity by option number.
     CoapOption {
-        /// CoAP option number.
-        number: u16,
+        /// Universal CoAP option number.
+        number: u64,
     },
     /// Synthetic marker used for CoAP option processing.
     SyntheticCoapMarker,

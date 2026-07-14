@@ -3,7 +3,7 @@
 //!
 //! CORECONF normal compression field keys:
 //! 1 = entry-index, 2 = field-id, 5 = field-length, 6 = field-length-value,
-//! 7 = direction-indicator, 8 = field-position, 9 = target-value,
+//! 7 = direction-indicator, 8 = field-position, optional 9 = target-value,
 //! 12 = matching-operator, 13 = matching-operator-value,
 //! 16 = comp-decomp-action.
 
@@ -41,7 +41,7 @@ fn coreconf_rule() -> ciborium::value::Value {
                             length_value: None,
                             direction_sid: 4000,
                             field_position: 1,
-                            target: target_list(vec![bytes(&[0x06])]),
+                            target: Some(target_list(vec![bytes(&[0x06])])),
                             matching_sid: 2000,
                             matching_value: None,
                             cda_sid: 3000,
@@ -53,7 +53,7 @@ fn coreconf_rule() -> ciborium::value::Value {
                             length_value: None,
                             direction_sid: 4000,
                             field_position: 1,
-                            target: target_list(vec![bytes(&[0x40])]),
+                            target: Some(target_list(vec![bytes(&[0x40])])),
                             matching_sid: 2002,
                             matching_value: Some(target_list(vec![bytes(&[0x04])])),
                             cda_sid: 3003,
@@ -123,7 +123,7 @@ fn coreconf_field_length_function_uses_key_5_and_6() {
                         length_value: None,
                         direction_sid: 4000,
                         field_position: 1,
-                        target: target_list(vec![bytes(&[])]),
+                        target: Some(target_list(vec![bytes(&[])])),
                         matching_sid: 2001,
                         matching_value: None,
                         cda_sid: 3001,
@@ -143,7 +143,381 @@ fn coreconf_field_length_function_uses_key_5_and_6() {
 }
 
 #[test]
-fn rejects_non_coreconf_normal_field_key_layout() {
+fn universal_coreconf_entry_accepts_optional_target_for_ignore_value_sent() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![universal_coreconf_field(UniversalField {
+        entry_index: 0,
+        option_number: 11,
+        target: None,
+        matching_sid: 2001,
+        matching_value: None,
+        cda_sid: 3001,
+        space_sid: 6000,
+    })]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let context = RuleContext::from_cbor_slice(&cbor, registry).unwrap();
+    assert_eq!(
+        context.rules().rules()[0].fields()[0].target,
+        TargetValue::None
+    );
+}
+
+#[test]
+fn normal_coreconf_entries_accept_optional_targets_when_semantics_allow() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    for (field_sid, length, cda_sid) in [(1005, 8, 3001), (1003, 16, 3004)] {
+        let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
+            entry_index: 0,
+            field_sid,
+            length: int(length),
+            length_value: None,
+            direction_sid: 4000,
+            field_position: 1,
+            target: None,
+            matching_sid: 2001,
+            matching_value: None,
+            cda_sid,
+        })]);
+        let mut cbor = Vec::new();
+        ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+        let context = RuleContext::from_cbor_slice(&cbor, registry.clone()).unwrap();
+        assert_eq!(
+            context.rules().rules()[0].fields()[0].target,
+            TargetValue::None
+        );
+    }
+}
+
+#[test]
+fn coreconf_entry_rejects_missing_target_for_equal_matching() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
+        entry_index: 0,
+        field_sid: 1000,
+        length: int(4),
+        length_value: None,
+        direction_sid: 4000,
+        field_position: 1,
+        target: None,
+        matching_sid: 2000,
+        matching_value: None,
+        cda_sid: 3000,
+    })]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
+    assert!(error.to_string().contains("byte target"), "{error}");
+}
+
+#[test]
+fn coreconf_entry_rejects_missing_target_for_not_sent() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
+        entry_index: 0,
+        field_sid: 1005,
+        length: int(8),
+        length_value: None,
+        direction_sid: 4000,
+        field_position: 1,
+        target: None,
+        matching_sid: 2001,
+        matching_value: None,
+        cda_sid: 3000,
+    })]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
+    assert!(error.to_string().contains("byte target"), "{error}");
+}
+
+#[test]
+fn universal_coreconf_entry_rejects_unsupported_space() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![universal_coreconf_field(UniversalField {
+        entry_index: 0,
+        option_number: 11,
+        target: Some(target_list(vec![bytes(&[0xab])])),
+        matching_sid: 2000,
+        matching_value: None,
+        cda_sid: 3000,
+        space_sid: 1000,
+    })]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported universal field space"),
+        "{error}"
+    );
+}
+
+#[test]
+fn universal_value_is_not_narrowed_during_rule_loading() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![universal_coreconf_field(UniversalField {
+        entry_index: 0,
+        option_number: i128::from(u32::MAX) + 1,
+        target: None,
+        matching_sid: 2001,
+        matching_value: None,
+        cda_sid: 3001,
+        space_sid: 6000,
+    })]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let context = RuleContext::from_cbor_slice(&cbor, registry).unwrap();
+    assert_eq!(
+        context.rules().rules()[0].fields()[0].field,
+        FieldRef::CoapOption {
+            number: u64::from(u32::MAX) + 1
+        }
+    );
+}
+
+#[test]
+fn singleton_mapping_target_preserves_mapping_shape() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    for (matching_sid, cda_sid) in [(2003, 3001), (2001, 3002)] {
+        let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
+            entry_index: 0,
+            field_sid: 1000,
+            length: int(8),
+            length_value: None,
+            direction_sid: 4000,
+            field_position: 1,
+            target: Some(target_list(vec![bytes(&[0xab])])),
+            matching_sid,
+            matching_value: None,
+            cda_sid,
+        })]);
+        let mut cbor = Vec::new();
+        ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+        let context = RuleContext::from_cbor_slice(&cbor, registry.clone()).unwrap();
+        assert_eq!(
+            context.rules().rules()[0].fields()[0].target,
+            TargetValue::Mapping(vec![vec![0xab]])
+        );
+    }
+}
+
+#[test]
+fn empty_mapping_target_is_rejected() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
+        entry_index: 0,
+        field_sid: 1000,
+        length: int(8),
+        length_value: None,
+        direction_sid: 4000,
+        field_position: 1,
+        target: Some(target_list(vec![])),
+        matching_sid: 2003,
+        matching_value: None,
+        cda_sid: 3002,
+    })]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
+    assert!(error.to_string().contains("non-empty mapping"), "{error}");
+}
+
+#[test]
+fn target_mapping_is_ordered_by_explicit_index() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
+        entry_index: 0,
+        field_sid: 1000,
+        length: int(8),
+        length_value: None,
+        direction_sid: 4000,
+        field_position: 1,
+        target: Some(target_list_with_indexes(vec![
+            (1, bytes(&[0xcd])),
+            (0, bytes(&[0xab])),
+        ])),
+        matching_sid: 2003,
+        matching_value: None,
+        cda_sid: 3002,
+    })]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let context = RuleContext::from_cbor_slice(&cbor, registry).unwrap();
+    assert_eq!(
+        context.rules().rules()[0].fields()[0].target,
+        TargetValue::Mapping(vec![vec![0xab], vec![0xcd]])
+    );
+}
+
+#[test]
+fn duplicate_target_indexes_are_rejected() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
+        entry_index: 0,
+        field_sid: 1000,
+        length: int(8),
+        length_value: None,
+        direction_sid: 4000,
+        field_position: 1,
+        target: Some(target_list_with_indexes(vec![
+            (0, bytes(&[0xab])),
+            (0, bytes(&[0xcd])),
+        ])),
+        matching_sid: 2003,
+        matching_value: None,
+        cda_sid: 3002,
+    })]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
+    assert!(
+        error.to_string().contains("duplicate target index"),
+        "{error}"
+    );
+}
+
+#[test]
+fn non_consecutive_target_indexes_are_rejected() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
+        entry_index: 0,
+        field_sid: 1000,
+        length: int(8),
+        length_value: None,
+        direction_sid: 4000,
+        field_position: 1,
+        target: Some(target_list_with_indexes(vec![(1, bytes(&[0xab]))])),
+        matching_sid: 2003,
+        matching_value: None,
+        cda_sid: 3002,
+    })]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
+    assert!(error.to_string().contains("consecutive from 0"), "{error}");
+}
+
+#[test]
+fn cbor_entries_are_normalized_by_explicit_entry_index() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![
+        normal_coreconf_field(CoreconfField {
+            entry_index: 1,
+            field_sid: 1005,
+            length: int(8),
+            length_value: None,
+            direction_sid: 4000,
+            field_position: 1,
+            target: Some(target_list(vec![bytes(&[0xff])])),
+            matching_sid: 2000,
+            matching_value: None,
+            cda_sid: 3000,
+        }),
+        normal_coreconf_field(CoreconfField {
+            entry_index: 0,
+            field_sid: 1000,
+            length: int(4),
+            length_value: None,
+            direction_sid: 4000,
+            field_position: 1,
+            target: Some(target_list(vec![bytes(&[0x06])])),
+            matching_sid: 2000,
+            matching_value: None,
+            cda_sid: 3000,
+        }),
+    ]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let context = RuleContext::from_cbor_slice(&cbor, registry).unwrap();
+    assert_eq!(
+        context.rules().rules()[0].fields()[0].field,
+        FieldRef::Ipv6("fid-ipv6-version")
+    );
+    assert_eq!(context.rules().rules()[0].fields()[0].entry_index, 0);
+}
+
+#[test]
+fn duplicate_field_entry_indexes_are_rejected() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![
+        normal_coreconf_field(CoreconfField {
+            entry_index: 0,
+            field_sid: 1000,
+            length: int(4),
+            length_value: None,
+            direction_sid: 4000,
+            field_position: 1,
+            target: Some(target_list(vec![bytes(&[0x06])])),
+            matching_sid: 2000,
+            matching_value: None,
+            cda_sid: 3000,
+        }),
+        normal_coreconf_field(CoreconfField {
+            entry_index: 0,
+            field_sid: 1005,
+            length: int(8),
+            length_value: None,
+            direction_sid: 4000,
+            field_position: 1,
+            target: Some(target_list(vec![bytes(&[0xff])])),
+            matching_sid: 2000,
+            matching_value: None,
+            cda_sid: 3000,
+        }),
+    ]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
+    assert!(
+        error.to_string().contains("duplicate field entry index"),
+        "{error}"
+    );
+}
+
+#[test]
+fn rejects_entries_with_both_field_identity_forms() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = rule_with_fields(vec![map(vec![
+        (int(1), int(0)),
+        (int(2), int(1000)),
+        (int(3), int(6000)),
+        (int(4), int(11)),
+        (int(5), int(4)),
+        (int(7), int(4000)),
+        (int(8), int(1)),
+        (int(9), target_list(vec![bytes(&[0x06])])),
+        (int(12), int(2000)),
+        (int(16), int(3000)),
+    ])]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("either field-id key 2 or both space-id key 3"),
+        "entry with ambiguous field identity should be rejected, got: {error}"
+    );
+}
+
+#[test]
+fn rejects_entries_without_current_field_identity_keys() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let root = map(vec![(
         int(2574),
@@ -156,13 +530,12 @@ fn rejects_non_coreconf_normal_field_key_layout() {
                     int(23),
                     array(vec![map(vec![
                         (int(1), int(0)),
-                        (int(3), int(1000)),
-                        (int(4), int(4)),
-                        (int(6), int(4000)),
-                        (int(7), int(1)),
-                        (int(8), target_list(vec![bytes(&[0x06])])),
-                        (int(11), int(2000)),
-                        (int(15), int(3000)),
+                        (int(5), int(4)),
+                        (int(7), int(4000)),
+                        (int(8), int(1)),
+                        (int(9), target_list(vec![bytes(&[0x06])])),
+                        (int(12), int(2000)),
+                        (int(16), int(3000)),
                     ])]),
                 ),
             ])]),
@@ -173,8 +546,10 @@ fn rejects_non_coreconf_normal_field_key_layout() {
 
     let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
     assert!(
-        error.to_string().contains("key 2"),
-        "non-CORECONF field key layout should be rejected with a missing field-id key error, got: {error}"
+        error
+            .to_string()
+            .contains("either field-id key 2 or both space-id key 3"),
+        "entry without a field identity should be rejected, got: {error}"
     );
 }
 
@@ -185,10 +560,54 @@ struct CoreconfField {
     length_value: Option<ciborium::value::Value>,
     direction_sid: i128,
     field_position: i128,
-    target: ciborium::value::Value,
+    target: Option<ciborium::value::Value>,
     matching_sid: i128,
     matching_value: Option<ciborium::value::Value>,
     cda_sid: i128,
+}
+
+struct UniversalField {
+    entry_index: i128,
+    option_number: i128,
+    target: Option<ciborium::value::Value>,
+    matching_sid: i128,
+    matching_value: Option<ciborium::value::Value>,
+    cda_sid: i128,
+    space_sid: i128,
+}
+
+fn rule_with_fields(fields: Vec<ciborium::value::Value>) -> ciborium::value::Value {
+    map(vec![(
+        int(2574),
+        map(vec![(
+            int(23),
+            array(vec![map(vec![
+                (int(1), int(4)),
+                (int(2), int(3)),
+                (int(23), array(fields)),
+            ])]),
+        )]),
+    )])
+}
+
+fn universal_coreconf_field(field: UniversalField) -> ciborium::value::Value {
+    let mut entries = vec![
+        (int(1), int(field.entry_index)),
+        (int(3), int(field.space_sid)),
+        (int(4), int(field.option_number)),
+        (int(5), int(8)),
+        (int(7), int(4000)),
+        (int(8), int(1)),
+        (int(12), int(field.matching_sid)),
+        (int(16), int(field.cda_sid)),
+    ];
+    if let Some(target) = field.target {
+        entries.push((int(9), target));
+    }
+    if let Some(matching_value) = field.matching_value {
+        entries.push((int(13), matching_value));
+    }
+    map(entries)
 }
 
 fn normal_coreconf_field(field: CoreconfField) -> ciborium::value::Value {
@@ -198,12 +617,14 @@ fn normal_coreconf_field(field: CoreconfField) -> ciborium::value::Value {
         (int(5), field.length),
         (int(7), int(field.direction_sid)),
         (int(8), int(field.field_position)),
-        (int(9), field.target),
         (int(12), int(field.matching_sid)),
         (int(16), int(field.cda_sid)),
     ];
     if let Some(length_value) = field.length_value {
         entries.push((int(6), length_value));
+    }
+    if let Some(target) = field.target {
+        entries.push((int(9), target));
     }
     if let Some(matching_value) = field.matching_value {
         entries.push((int(13), matching_value));
@@ -212,10 +633,15 @@ fn normal_coreconf_field(field: CoreconfField) -> ciborium::value::Value {
 }
 
 fn target_list(values: Vec<ciborium::value::Value>) -> ciborium::value::Value {
+    target_list_with_indexes(values.into_iter().enumerate().collect())
+}
+
+fn target_list_with_indexes(
+    values: Vec<(usize, ciborium::value::Value)>,
+) -> ciborium::value::Value {
     array(
         values
             .into_iter()
-            .enumerate()
             .map(|(index, value)| map(vec![(int(1), int(index as i128)), (int(2), value)]))
             .collect(),
     )

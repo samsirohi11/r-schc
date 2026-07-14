@@ -159,7 +159,10 @@ fn reconstruct_coap(fields: &FieldStore) -> Result<Vec<u8>> {
     let mut options = Vec::new();
     for (key, value) in fields.iter() {
         if let FieldRef::CoapOption { number } = key.field() {
-            options.push(CoapOption::new(u32::from(*number), value.bytes().to_vec())?);
+            let number = u32::try_from(*number).map_err(|_| {
+                SchcError::InvalidResidue(format!("CoAP option number {number} does not fit u32"))
+            })?;
+            options.push(CoapOption::new(number, value.bytes().to_vec())?);
         }
     }
 

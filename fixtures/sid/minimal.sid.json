@@ -27,6 +27,7 @@
       { "namespace": "identity", "identifier": "fid-coap-option-uri-path", "sid": 1207 },
       { "namespace": "identity", "identifier": "fid-coap-payload", "sid": 1208 },
       { "namespace": "identity", "identifier": "fid-coap-payload-marker", "sid": 1209 },
+      { "namespace": "identity", "identifier": "space-id-coap", "sid": 6000 },
       { "namespace": "identity", "identifier": "fid-icmpv6-type", "sid": 1300 },
       { "namespace": "identity", "identifier": "fid-icmpv6-code", "sid": 1301 },
       { "namespace": "identity", "identifier": "fid-icmpv6-checksum", "sid": 1302 },
