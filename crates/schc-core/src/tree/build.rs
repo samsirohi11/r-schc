@@ -143,9 +143,11 @@ fn push_field_ref(output: &mut Vec<u8>, field: &FieldRef) {
             output.push(4);
             output.extend_from_slice(&number.to_be_bytes());
         }
-        FieldRef::SyntheticCoapMarker => output.push(5),
+        FieldRef::Unused => output.push(5),
+        FieldRef::Payload => output.push(6),
+        FieldRef::SyntheticCoapMarker => output.push(7),
         FieldRef::UnknownSid(sid) => {
-            output.push(6);
+            output.push(8);
             output.extend_from_slice(&sid.to_be_bytes());
         }
     }

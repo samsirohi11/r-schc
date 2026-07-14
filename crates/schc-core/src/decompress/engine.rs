@@ -3,7 +3,7 @@
 use crate::bit::{BitReader, BitWriter};
 use crate::error::{Result, SchcError};
 use crate::packet::{
-    field::{FieldKey, FieldStore, FieldValue},
+    field::{FieldKey, FieldStore, FieldValue, PacketScope},
     length::{read_variable_length_prefix, LengthResolver},
 };
 use crate::rule::{
@@ -89,6 +89,10 @@ fn inverse_direction(position: Position) -> Direction {
     }
 }
 
+fn value_is_icmp_error(value: u64) -> bool {
+    matches!(value, 1..=4)
+}
+
 fn decode_fields(
     rule: &Rule,
     direction: Direction,
@@ -96,6 +100,7 @@ fn decode_fields(
 ) -> Result<FieldStore> {
     let mut fields = FieldStore::default();
     let mut lengths = LengthResolver::default();
+    let mut scope = PacketScope::Outer;
     for field in rule
         .fields()
         .iter()
@@ -107,6 +112,31 @@ fn decode_fields(
         if matches!(field.action, Cda::Compute) {
             continue;
         }
+        if scope == PacketScope::Outer
+            && matches!(field.field, FieldRef::Ipv6("fid-ipv6-version"))
+            && fields
+                .first_by_field_scope(&FieldRef::Icmpv6("fid-icmpv6-type"), PacketScope::Outer)
+                .is_some_and(|value| value.to_u64().ok().is_some_and(value_is_icmp_error))
+            && fields.contains_field_scope(&FieldRef::Ipv6("fid-ipv6-version"), PacketScope::Outer)
+        {
+            scope = PacketScope::Embedded;
+        }
+        if scope == PacketScope::Outer
+            && matches!(
+                field.field,
+                FieldRef::Udp(_) | FieldRef::Coap(_) | FieldRef::CoapOption { .. }
+            )
+            && fields
+                .first_by_field_scope(&FieldRef::Ipv6("fid-ipv6-nextheader"), PacketScope::Outer)
+                .is_some_and(|value| value.to_u64().ok() == Some(58))
+            && fields
+                .first_by_field_scope(&FieldRef::Icmpv6("fid-icmpv6-type"), PacketScope::Outer)
+                .is_some_and(|value| value.to_u64().ok().is_some_and(value_is_icmp_error))
+        {
+            return Err(SchcError::InvalidResidue(
+                "embedded transport field appears before embedded IPv6 scope".to_owned(),
+            ));
+        }
         let bit_len = decode_field_len(field, reader, &lengths, &fields)?;
         let value = decode_field_value(field, bit_len, reader)?;
         if matches!(field.field, FieldRef::Coap("fid-coap-tkl")) {
@@ -115,7 +145,12 @@ fn decode_fields(
             })?);
         }
         fields.insert(
-            FieldKey::new(field.field.clone(), field.field_position, field.entry_index),
+            FieldKey::with_scope(
+                field.field.clone(),
+                field.field_position,
+                field.entry_index,
+                scope,
+            ),
             value,
         );
     }

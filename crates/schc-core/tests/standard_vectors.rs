@@ -406,6 +406,7 @@ mod icmpv6_error_embedded {
           { "field": "fid-icmpv6-type", "length_bits": 8, "direction": "bi", "target": "01", "mo": "equal", "cda": "not-sent" },
           { "field": "fid-icmpv6-code", "length_bits": 8, "direction": "bi", "target": "04", "mo": "equal", "cda": "not-sent" },
           { "field": "fid-icmpv6-checksum", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" },
+          { "field": "fid-unused", "length_bits": 32, "direction": "bi", "target": "00000000", "mo": "equal", "cda": "not-sent" },
 
           { "field": "fid-ipv6-version", "length_bits": 4, "field_position": 2, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
           { "field": "fid-ipv6-trafficclass", "length_bits": 8, "field_position": 2, "direction": "bi", "target": "00", "mo": "equal", "cda": "not-sent" },

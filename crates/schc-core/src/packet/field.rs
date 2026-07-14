@@ -4,21 +4,43 @@ use crate::bit::{BitReader, BitWriter};
 use crate::error::{Result, SchcError};
 use crate::rule::FieldRef;
 
+/// Packet nesting scope used internally while traversing a packet.
+///
+/// This is deliberately separate from SCHC field position. Field position
+/// continues to identify repeated occurrences of a field, while scope records
+/// whether the occurrence belongs to the outer packet or an embedded packet.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub(crate) enum PacketScope {
+    Outer,
+    Embedded,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 #[allow(dead_code)]
 pub(crate) struct FieldKey {
     field: FieldRef,
     field_position: usize,
     entry_index: usize,
+    scope: PacketScope,
 }
 
 impl FieldKey {
     #[allow(dead_code)]
     pub(crate) fn new(field: FieldRef, field_position: usize, entry_index: usize) -> Self {
+        Self::with_scope(field, field_position, entry_index, PacketScope::Outer)
+    }
+
+    pub(crate) fn with_scope(
+        field: FieldRef,
+        field_position: usize,
+        entry_index: usize,
+        scope: PacketScope,
+    ) -> Self {
         Self {
             field,
             field_position,
             entry_index,
+            scope,
         }
     }
 
@@ -35,6 +57,10 @@ impl FieldKey {
     #[allow(dead_code)]
     pub(crate) const fn field_position(&self) -> usize {
         self.field_position
+    }
+
+    pub(crate) const fn scope(&self) -> PacketScope {
+        self.scope
     }
 }
 
@@ -83,8 +109,9 @@ impl FieldStore {
 
     /// Returns the first stored value for `field` at a specific field position.
     ///
-    /// Used to distinguish an outer packet field (position 1) from an
-    /// ICMPv6-embedded inner packet field (position 2).
+    /// Field position remains available for existing position-based vectors;
+    /// packet nesting is represented separately by [`PacketScope`].
+    #[allow(dead_code)]
     pub(crate) fn first_by_field_position(
         &self,
         field: &FieldRef,
@@ -93,6 +120,22 @@ impl FieldStore {
         self.values.iter().find_map(|(key, value)| {
             (key.field() == field && key.field_position() == position).then_some(value)
         })
+    }
+
+    /// Returns the first stored value for `field` in a packet scope.
+    pub(crate) fn first_by_field_scope(
+        &self,
+        field: &FieldRef,
+        scope: PacketScope,
+    ) -> Option<&FieldValue> {
+        self.values.iter().find_map(|(key, value)| {
+            (key.field() == field && key.scope() == scope).then_some(value)
+        })
+    }
+
+    /// Returns true when a field is present in a packet scope.
+    pub(crate) fn contains_field_scope(&self, field: &FieldRef, scope: PacketScope) -> bool {
+        self.first_by_field_scope(field, scope).is_some()
     }
 
     /// Iterates over all stored fields in insertion (rule entry) order.

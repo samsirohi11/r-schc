@@ -85,6 +85,10 @@ pub enum FieldRef {
         /// Universal CoAP option number.
         number: u64,
     },
+    /// Generic protocol padding or unused data.
+    Unused,
+    /// Generic remaining payload data.
+    Payload,
     /// Synthetic marker used for CoAP option processing.
     SyntheticCoapMarker,
     /// SID that exists but is not mapped to a built-in field family.

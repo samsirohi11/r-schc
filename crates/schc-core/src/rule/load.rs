@@ -390,6 +390,26 @@ fn validate_field_rule(rule_index: usize, field: &FieldRule) -> Result<()> {
             "CoAP payload marker must use not-sent with ignore".to_owned(),
         ));
     }
+    if matches!(field.field, FieldRef::Payload)
+        && !matches!(
+            &field.length,
+            FieldLength::FixedBits(bits) if *bits % 8 == 0
+        )
+        && !matches!(&field.length, FieldLength::VariableBytes)
+        && !matches!(
+            &field.length,
+            FieldLength::FromPreviousField {
+                unit: LengthUnit::Bytes,
+                ..
+            }
+        )
+    {
+        return Err(invalid_field(
+            rule_index,
+            field.entry_index,
+            "fid-payload length must be expressed in whole bytes".to_owned(),
+        ));
+    }
     Ok(())
 }
 
@@ -1339,6 +1359,8 @@ fn field_ref(identifier: &str, sid: u64) -> FieldRef {
         "fid-icmpv6-code" => FieldRef::Icmpv6("fid-icmpv6-code"),
         "fid-icmpv6-checksum" => FieldRef::Icmpv6("fid-icmpv6-checksum"),
         "fid-icmpv6-payload" => FieldRef::Icmpv6("fid-icmpv6-payload"),
+        "fid-unused" => FieldRef::Unused,
+        "fid-payload" => FieldRef::Payload,
         _ => FieldRef::UnknownSid(sid),
     }
 }

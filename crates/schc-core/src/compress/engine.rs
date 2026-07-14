@@ -3,7 +3,7 @@
 use crate::bit::{BitReader, BitWriter};
 use crate::error::{Result, SchcError};
 use crate::packet::{
-    field::{FieldKey, FieldStore, FieldValue},
+    field::{FieldKey, FieldStore, FieldValue, PacketScope},
     length::{write_variable_length_prefix, LengthResolver},
     Ipv6Packet, UdpDatagram,
 };
@@ -206,17 +206,22 @@ impl Compressor {
                 continue;
             }
 
-            let bit_len = match &branch.parse.length {
-                FieldLength::VariableBytes | FieldLength::VariableBits => None,
-                length => Some(state.lengths.resolve(length, &state.fields)?),
-            };
+            let scope = scope_for_field(state, &branch.parse.field)?;
+            let bit_len = resolve_field_bit_len(&branch.parse.length, state)?;
             let field = extract_field(
                 packet,
                 direction,
                 &branch.parse,
                 bit_len,
                 state.coap_option_index,
+                scope,
+                state
+                    .fields
+                    .contains_field_scope(&FieldRef::Coap("fid-coap-version"), scope),
             )?;
+            if bit_len.is_some_and(|expected| field.bit_len() != expected) {
+                continue;
+            }
             let Some(match_result) = matches_branch(&field, &branch)? else {
                 continue;
             };
@@ -229,11 +234,13 @@ impl Compressor {
                 })?;
                 next_state.lengths.set_token_length(token_length);
             }
+            next_state.scope = scope;
             next_state.fields.insert(
-                FieldKey::new(
+                FieldKey::with_scope(
                     branch.parse.field.clone(),
                     branch.parse.field_position,
                     branch.parse.entry_index,
+                    scope,
                 ),
                 field,
             );
@@ -254,12 +261,20 @@ impl Compressor {
     }
 }
 
+fn resolve_field_bit_len(length: &FieldLength, state: &CompressionState) -> Result<Option<usize>> {
+    match length {
+        FieldLength::VariableBytes | FieldLength::VariableBits => Ok(None),
+        length => state.lengths.resolve(length, &state.fields).map(Some),
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CompressionState {
     residue: BitWriter,
     fields: FieldStore,
     lengths: LengthResolver,
     coap_option_index: usize,
+    scope: PacketScope,
 }
 
 impl Default for CompressionState {
@@ -269,6 +284,7 @@ impl Default for CompressionState {
             fields: FieldStore::default(),
             lengths: LengthResolver::default(),
             coap_option_index: 0,
+            scope: PacketScope::Outer,
         }
     }
 }
@@ -504,24 +520,41 @@ fn extract_field(
     parse: &ParseStep,
     bit_len: Option<usize>,
     coap_option_index: usize,
+    scope: PacketScope,
+    coap_present: bool,
 ) -> Result<FieldValue> {
-    if parse.field_position >= 2 && is_inner_embedded_field(&parse.field) {
-        return extract_embedded_field(packet, direction, parse);
-    }
+    let source = crate::packet::traversal::packet_for_scope(packet, scope)?;
+    let source_direction = if scope == PacketScope::Embedded {
+        reverse_direction(direction)
+    } else {
+        direction
+    };
     match &parse.field {
-        FieldRef::Ipv6(name) => extract_ipv6_field(packet, direction, name),
+        FieldRef::Ipv6(name) => extract_ipv6_field(&source, source_direction, name),
         FieldRef::Udp(name) => {
-            let ipv6 = Ipv6Packet::parse(packet)?;
+            let ipv6 = Ipv6Packet::parse(&source)?;
             let udp = UdpDatagram::parse(ipv6.payload())?;
-            extract_udp_field(&udp.to_vec(), direction, name)
+            extract_udp_field(&udp.to_vec(), source_direction, name)
         }
         FieldRef::Coap(name) => {
-            let ipv6 = Ipv6Packet::parse(packet)?;
+            if scope == PacketScope::Embedded {
+                return Err(packet_error(
+                    "compression",
+                    "CoAP field is outside supported embedded scope",
+                ));
+            }
+            let ipv6 = Ipv6Packet::parse(&source)?;
             let udp = UdpDatagram::parse(ipv6.payload())?;
             extract_coap_field(udp.payload(), name, bit_len)
         }
         FieldRef::CoapOption { number } => {
-            let ipv6 = Ipv6Packet::parse(packet)?;
+            if scope == PacketScope::Embedded {
+                return Err(packet_error(
+                    "compression",
+                    "CoAP option is outside supported embedded scope",
+                ));
+            }
+            let ipv6 = Ipv6Packet::parse(&source)?;
             let udp = UdpDatagram::parse(ipv6.payload())?;
             let coap = crate::packet::CoapMessage::parse(udp.payload())?;
             let option = coap
@@ -533,10 +566,31 @@ fn extract_field(
             FieldValue::from_bytes(option.value().to_vec(), option.value().len() * 8)
         }
         FieldRef::Icmpv6(name) => {
-            let ipv6 = Ipv6Packet::parse(packet)?;
+            if scope == PacketScope::Embedded {
+                return Err(packet_error(
+                    "compression",
+                    "ICMPv6 field is outside supported embedded scope",
+                ));
+            }
+            let ipv6 = Ipv6Packet::parse(&source)?;
             let icmp = crate::packet::Icmpv6Message::parse(ipv6.payload())?;
             extract_icmpv6_field(&icmp.to_vec(), name)
         }
+        FieldRef::Unused => {
+            if scope == PacketScope::Embedded {
+                return Err(packet_error(
+                    "compression",
+                    "fid-unused is only valid in an outer ICMPv6 error",
+                ));
+            }
+            if bit_len != Some(32) {
+                return Err(SchcError::InvalidResidue(
+                    "fid-unused requires a 32-bit length for ICMPv6 error processing".to_owned(),
+                ));
+            }
+            extract_unused_field(&source)
+        }
+        FieldRef::Payload => extract_generic_payload(&source, source_direction, coap_present),
         FieldRef::SyntheticCoapMarker => Err(packet_error(
             "compression",
             "unsupported synthetic CoAP marker field",
@@ -545,12 +599,6 @@ fn extract_field(
     }
 }
 
-/// Returns true when `field` may belong to an ICMPv6-embedded inner packet.
-fn is_inner_embedded_field(field: &FieldRef) -> bool {
-    matches!(field, FieldRef::Ipv6(_) | FieldRef::Udp(_))
-}
-
-/// Reverses a packet direction.
 fn reverse_direction(direction: Direction) -> Direction {
     match direction {
         Direction::Up => Direction::Down,
@@ -558,54 +606,106 @@ fn reverse_direction(direction: Direction) -> Direction {
     }
 }
 
-/// Returns true when `message_type` is an `ICMPv6` error type that embeds a copy
-/// of the invoking packet.
-fn is_icmpv6_error_type(message_type: u8) -> bool {
-    matches!(message_type, 1..=4)
+fn scope_for_field(state: &CompressionState, field: &FieldRef) -> Result<PacketScope> {
+    if state.scope == PacketScope::Embedded {
+        return Ok(PacketScope::Embedded);
+    }
+    let is_error = state
+        .fields
+        .first_by_field_scope(&FieldRef::Icmpv6("fid-icmpv6-type"), PacketScope::Outer)
+        .is_some_and(|value| value.to_u64().ok().is_some_and(value_is_icmp_error));
+    if is_error {
+        if matches!(field, FieldRef::Ipv6("fid-ipv6-version"))
+            && state
+                .fields
+                .contains_field_scope(&FieldRef::Ipv6("fid-ipv6-version"), PacketScope::Outer)
+        {
+            return Ok(PacketScope::Embedded);
+        }
+        if matches!(
+            field,
+            FieldRef::Udp(_) | FieldRef::Coap(_) | FieldRef::CoapOption { .. }
+        ) && state
+            .fields
+            .first_by_field_scope(&FieldRef::Ipv6("fid-ipv6-nextheader"), PacketScope::Outer)
+            .is_some_and(|value| value.to_u64().ok() == Some(58))
+        {
+            return Err(packet_error(
+                "compression",
+                "embedded transport field appears before embedded IPv6 scope",
+            ));
+        }
+    }
+    Ok(PacketScope::Outer)
 }
 
-/// Extracts a field from the packet embedded in an `ICMPv6` error message.
-///
-/// The embedded packet starts after the 8-byte `ICMPv6` error header
-/// (type, code, checksum, 4 unused bytes) and is parsed with the direction
-/// reversed relative to the outer packet.
-fn extract_embedded_field(
-    packet: &[u8],
-    direction: Direction,
-    parse: &ParseStep,
-) -> Result<FieldValue> {
-    let ipv6 = Ipv6Packet::parse(packet)?;
+fn value_is_icmp_error(value: u64) -> bool {
+    matches!(value, 1..=4)
+}
+
+fn extract_unused_field(packet: &[u8]) -> Result<FieldValue> {
+    let source = crate::packet::traversal::packet_for_scope(packet, PacketScope::Outer)?;
+    let ipv6 = Ipv6Packet::parse(&source)?;
     if ipv6.next_header() != 58 {
         return Err(packet_error(
-            "compression",
-            "inner embedded field requires an ICMPv6 next header",
+            "ICMPv6",
+            "fid-unused requires an ICMPv6 next header",
         ));
     }
     let icmp = crate::packet::Icmpv6Message::parse(ipv6.payload())?;
-    if !is_icmpv6_error_type(icmp.message_type()) {
+    if !crate::packet::traversal::has_icmpv6_unused_field(icmp.message_type()) {
         return Err(packet_error(
-            "compression",
-            "inner embedded field requires an ICMPv6 error type",
+            "ICMPv6",
+            format!(
+                "fid-unused is not defined for ICMPv6 error type {}",
+                icmp.message_type()
+            ),
         ));
     }
-    if ipv6.payload().len() < 8 {
+    if icmp.payload().len() < 4 {
         return Err(packet_error(
             "ICMPv6",
             "error header is shorter than 8 bytes",
         ));
     }
-    let embedded = &ipv6.payload()[8..];
-    let inner_direction = reverse_direction(direction);
-    match &parse.field {
-        FieldRef::Ipv6(name) => extract_ipv6_field(embedded, inner_direction, name),
-        FieldRef::Udp(name) => {
-            let inner_ipv6 = Ipv6Packet::parse(embedded)?;
-            let udp = UdpDatagram::parse(inner_ipv6.payload())?;
-            extract_udp_field(&udp.to_vec(), inner_direction, name)
+    FieldValue::from_bytes(icmp.payload()[..4].to_vec(), 32)
+}
+
+fn extract_generic_payload(
+    packet: &[u8],
+    direction: Direction,
+    coap_present: bool,
+) -> Result<FieldValue> {
+    let source = crate::packet::traversal::packet_for_scope(packet, PacketScope::Outer)?;
+    let ipv6 = Ipv6Packet::parse(&source)?;
+    match ipv6.next_header() {
+        17 => {
+            let udp = UdpDatagram::parse(ipv6.payload())?;
+            if coap_present {
+                let coap = crate::packet::CoapMessage::parse(udp.payload())?;
+                FieldValue::from_bytes(coap.payload().to_vec(), coap.payload().len() * 8)
+            } else {
+                FieldValue::from_bytes(udp.payload().to_vec(), udp.payload().len() * 8)
+            }
         }
-        _ => Err(packet_error(
+        58 => {
+            let icmp = crate::packet::Icmpv6Message::parse(ipv6.payload())?;
+            let payload = if crate::packet::traversal::is_icmpv6_error_type(icmp.message_type()) {
+                if icmp.payload().len() < 4 {
+                    return Err(packet_error(
+                        "ICMPv6",
+                        "error header is shorter than 8 bytes",
+                    ));
+                }
+                &icmp.payload()[4..]
+            } else {
+                icmp.payload()
+            };
+            FieldValue::from_bytes(payload.to_vec(), payload.len() * 8)
+        }
+        value => Err(packet_error(
             "compression",
-            "unsupported inner embedded field",
+            format!("unsupported generic payload next header {value} for {direction:?} direction"),
         )),
     }
 }
