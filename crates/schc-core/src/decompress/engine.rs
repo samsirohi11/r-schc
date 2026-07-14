@@ -252,38 +252,9 @@ fn decode_lsb(field: &FieldRule, bit_len: usize, reader: &mut BitReader<'_>) -> 
         ));
     };
     let lsb_bits = bit_len - msb_bits;
-    if lsb_bits > 64 {
-        return Err(SchcError::InvalidResidue(
-            "lsb suffix wider than 64 bits is not supported".to_owned(),
-        ));
-    }
-    let lsb = read_optional_bits(reader, lsb_bits)?;
-    combine_lsb(&target, bit_len, msb_bits, lsb, lsb_bits)
-}
-
-fn read_optional_bits(reader: &mut BitReader<'_>, bit_len: usize) -> Result<u64> {
-    if bit_len == 0 {
-        Ok(0)
-    } else {
-        reader.read_bits(bit_len)
-    }
-}
-
-fn combine_lsb(
-    target: &FieldValue,
-    bit_len: usize,
-    msb_bits: usize,
-    lsb: u64,
-    lsb_bits: usize,
-) -> Result<FieldValue> {
     let mut writer = BitWriter::new();
-    let mut target_reader = BitReader::new(target.bytes());
-    for _ in 0..msb_bits {
-        writer.write_bits(target_reader.read_bits(1)?, 1)?;
-    }
-    if lsb_bits > 0 {
-        writer.write_bits(lsb, lsb_bits)?;
-    }
+    target.write_range_to(&mut writer, 0, msb_bits)?;
+    reader.copy_to(&mut writer, lsb_bits)?;
     FieldValue::from_bytes(writer.to_vec(), bit_len)
 }
 
@@ -371,6 +342,19 @@ mod tests {
         SidRegistry, TargetValue,
     };
 
+    fn lsb_field(length: usize, msb_bits: usize, target: Vec<u8>) -> FieldRule {
+        FieldRule {
+            field: FieldRef::Ipv6("fid-ipv6-devprefix"),
+            length: FieldLength::FixedBits(length),
+            field_position: 1,
+            direction: DirectionSelector::Bidirectional,
+            target: TargetValue::Bytes(target),
+            matching: MatchingOperator::Msb(msb_bits),
+            action: Cda::Lsb,
+            entry_index: 0,
+        }
+    }
+
     #[test]
     fn rule_selection_tries_loaded_rules_in_order() {
         let first = Rule::new(RuleId::new(0b10, 2), Vec::new());
@@ -385,22 +369,68 @@ mod tests {
 
     #[test]
     fn lsb_reconstructs_values_wider_than_u64() {
-        let field = FieldRule {
-            field: FieldRef::Ipv6("fid-ipv6-devprefix"),
-            length: FieldLength::FixedBits(72),
-            field_position: 1,
-            direction: DirectionSelector::Bidirectional,
-            target: TargetValue::Bytes(vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0]),
-            matching: MatchingOperator::Msb(64),
-            action: Cda::Lsb,
-            entry_index: 0,
-        };
+        let field = lsb_field(72, 64, vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0]);
         let mut reader = BitReader::new(&[0x99]);
 
         let value = decode_lsb(&field, 72, &mut reader).unwrap();
 
         assert_eq!(value.bytes(), &[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0x99]);
         assert_eq!(value.bit_len(), 72);
+    }
+
+    #[test]
+    fn lsb_reconstructs_65_bit_suffix_without_narrowing() {
+        let field = lsb_field(96, 31, vec![0x12, 0x34, 0x56, 0x78, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let mut reader = BitReader::new(&[0x4d, 0x5e, 0x6f, 0x78, 0x08, 0x91, 0x19, 0xa2, 0]);
+
+        let value = decode_lsb(&field, 96, &mut reader).unwrap();
+
+        assert_eq!(
+            value.bytes(),
+            &[0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44]
+        );
+        assert_eq!(value.bit_len(), 96);
+    }
+
+    #[test]
+    fn lsb_reconstructs_96_bit_suffix_without_narrowing() {
+        let field = lsb_field(
+            128,
+            32,
+            vec![0x01, 0x23, 0x45, 0x67, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        );
+        let mut reader = BitReader::new(&[
+            0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+        ]);
+
+        let value = decode_lsb(&field, 128, &mut reader).unwrap();
+
+        assert_eq!(
+            value.bytes(),
+            &[
+                0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+                0xcd, 0xef
+            ]
+        );
+        assert_eq!(value.bit_len(), 128);
+    }
+
+    #[test]
+    fn lsb_reconstructs_suffix_across_non_byte_aligned_field_boundary() {
+        let field = lsb_field(
+            101,
+            36,
+            vec![0xa5, 0xc3, 0xf0, 0x96, 0x80, 0, 0, 0, 0, 0, 0, 0, 0],
+        );
+        let mut reader = BitReader::new(&[0x87, 0x76, 0x65, 0x54, 0x43, 0x32, 0x21, 0x10, 0x80]);
+
+        let value = decode_lsb(&field, 101, &mut reader).unwrap();
+
+        assert_eq!(
+            value.bytes(),
+            &[0xa5, 0xc3, 0xf0, 0x96, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x08]
+        );
+        assert_eq!(value.bit_len(), 101);
     }
 
     #[test]

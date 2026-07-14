@@ -1,3 +1,4 @@
+use crate::bit::BitWriter;
 use crate::error::{Result, SchcError};
 
 /// MSB-first bit reader over a borrowed byte slice.
@@ -69,6 +70,22 @@ impl<'a> BitReader<'a> {
         }
 
         Ok(value)
+    }
+
+    /// Copies up to `bits` bits to an MSB-first bit writer.
+    ///
+    /// Unlike [`Self::read_bits`], this operation is not limited to 64 bits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchcError::BitOutOfBounds`] when the requested bits are not
+    /// available.
+    pub(crate) fn copy_to(&mut self, writer: &mut BitWriter, bits: usize) -> Result<()> {
+        self.ensure_available(bits)?;
+        for _ in 0..bits {
+            writer.write_bit(self.read_bit() != 0);
+        }
+        Ok(())
     }
 
     /// Reads bits into bytes and pads the final byte with zero bits.

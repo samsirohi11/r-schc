@@ -36,7 +36,7 @@ impl BitWriter {
         }
 
         for shift in (0..bits).rev() {
-            self.write_bit(((value >> shift) & 1) as u8);
+            self.write_bit(((value >> shift) & 1) != 0);
         }
 
         Ok(())
@@ -81,12 +81,12 @@ impl BitWriter {
         bytes
     }
 
-    fn write_bit(&mut self, bit: u8) {
+    pub(crate) fn write_bit(&mut self, bit: bool) {
         if self.bit_len % 8 == 0 {
             self.bytes.push(0);
         }
 
-        if bit == 1 {
+        if bit {
             let byte_index = self.bit_len / 8;
             let shift = 7 - (self.bit_len % 8);
             self.bytes[byte_index] |= 1 << shift;

@@ -396,10 +396,7 @@ fn write_residue(
                 ));
             };
             let lsb_bits = field.bit_len() - msb_bits;
-            if lsb_bits == 0 {
-                return Ok(());
-            }
-            writer.write_bits(low_bits_u64(field, lsb_bits)?, lsb_bits)
+            field.write_range_to(writer, msb_bits, lsb_bits)
         }
     }
 }
@@ -426,10 +423,7 @@ fn mapping_index_bits(target: &TargetValue) -> Result<usize> {
 fn append_bits(output: &mut BitWriter, input: &BitWriter) -> Result<()> {
     let bytes = input.to_vec();
     let mut reader = BitReader::new(&bytes);
-    for _ in 0..input.bit_len() {
-        output.write_bits(reader.read_bits(1)?, 1)?;
-    }
-    Ok(())
+    reader.copy_to(output, input.bit_len())
 }
 
 /// Builds a no-compression candidate by writing the rule ID followed by the
@@ -470,26 +464,6 @@ fn field_bit(value: &FieldValue, index: usize) -> bool {
 fn prefix_bits_equal(left: &FieldValue, right: &FieldValue, bit_len: usize) -> bool {
     left.bit_len() == right.bit_len()
         && (0..bit_len).all(|index| field_bit(left, index) == field_bit(right, index))
-}
-
-fn low_bits_u64(value: &FieldValue, bit_len: usize) -> Result<u64> {
-    if bit_len > 64 {
-        return Err(SchcError::InvalidResidue(
-            "lsb for suffixes wider than 64 bits is not supported".to_owned(),
-        ));
-    }
-    if bit_len > value.bit_len() {
-        return Err(SchcError::InvalidBitLength {
-            operation: "lsb",
-            bits: bit_len,
-        });
-    }
-
-    let mut output = 0_u64;
-    for index in (value.bit_len() - bit_len)..value.bit_len() {
-        output = (output << 1) | u64::from(field_bit(value, index));
-    }
-    Ok(output)
 }
 
 fn bytes_as_value(bytes: &[u8], bit_len: usize) -> Result<FieldValue> {
@@ -869,10 +843,19 @@ mod tests {
     use crate::{DirectionSelector, FieldLength};
 
     fn branch(matching: MatchingOperator, target: TargetValue, action: Cda) -> Branch {
+        branch_with_length(8, matching, target, action)
+    }
+
+    fn branch_with_length(
+        length: usize,
+        matching: MatchingOperator,
+        target: TargetValue,
+        action: Cda,
+    ) -> Branch {
         Branch {
             parse: ParseStep {
                 field: FieldRef::Ipv6("fid-ipv6-hoplimit"),
-                length: FieldLength::FixedBits(8),
+                length: FieldLength::FixedBits(length),
                 field_position: 1,
                 entry_index: 0,
             },
@@ -1012,5 +995,89 @@ mod tests {
 
         assert_eq!(writer.bit_len(), 8);
         assert_eq!(writer.to_vec(), vec![0x99]);
+    }
+
+    #[test]
+    fn lsb_writes_65_bit_suffix_without_narrowing() {
+        let field = FieldValue::from_bytes(
+            vec![
+                0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44,
+            ],
+            96,
+        )
+        .unwrap();
+        let branch = branch_with_length(
+            96,
+            MatchingOperator::Msb(31),
+            TargetValue::Bytes(vec![0x12, 0x34, 0x56, 0x78, 0, 0, 0, 0, 0, 0, 0, 0]),
+            Cda::Lsb,
+        );
+        let result = matches_branch(&field, &branch).unwrap().unwrap();
+        let mut writer = BitWriter::new();
+
+        write_residue(&mut writer, &field, &branch, &result).unwrap();
+
+        assert_eq!(writer.bit_len(), 65);
+        assert_eq!(
+            writer.to_vec(),
+            vec![0x4d, 0x5e, 0x6f, 0x78, 0x08, 0x91, 0x19, 0xa2, 0x00]
+        );
+    }
+
+    #[test]
+    fn lsb_writes_96_bit_suffix_without_narrowing() {
+        let field = FieldValue::from_bytes(
+            vec![
+                0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+                0xcd, 0xef,
+            ],
+            128,
+        )
+        .unwrap();
+        let branch = branch_with_length(
+            128,
+            MatchingOperator::Msb(32),
+            TargetValue::Bytes(vec![
+                0x01, 0x23, 0x45, 0x67, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ]),
+            Cda::Lsb,
+        );
+        let result = matches_branch(&field, &branch).unwrap().unwrap();
+        let mut writer = BitWriter::new();
+
+        write_residue(&mut writer, &field, &branch, &result).unwrap();
+
+        assert_eq!(writer.bit_len(), 96);
+        assert_eq!(
+            writer.to_vec(),
+            vec![0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]
+        );
+    }
+
+    #[test]
+    fn lsb_writes_suffix_across_non_byte_aligned_field_boundary() {
+        let field = FieldValue::from_bytes(
+            vec![
+                0xa5, 0xc3, 0xf0, 0x96, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x08,
+            ],
+            101,
+        )
+        .unwrap();
+        let branch = branch_with_length(
+            101,
+            MatchingOperator::Msb(36),
+            TargetValue::Bytes(vec![0xa5, 0xc3, 0xf0, 0x96, 0x80, 0, 0, 0, 0, 0, 0, 0, 0]),
+            Cda::Lsb,
+        );
+        let result = matches_branch(&field, &branch).unwrap().unwrap();
+        let mut writer = BitWriter::new();
+
+        write_residue(&mut writer, &field, &branch, &result).unwrap();
+
+        assert_eq!(writer.bit_len(), 65);
+        assert_eq!(
+            writer.to_vec(),
+            vec![0x87, 0x76, 0x65, 0x54, 0x43, 0x32, 0x21, 0x10, 0x80]
+        );
     }
 }

@@ -201,11 +201,26 @@ impl FieldValue {
     }
 
     pub(crate) fn write_to(&self, writer: &mut BitWriter) -> Result<()> {
-        let mut reader = BitReader::new(self.bytes());
-        for _ in 0..self.bit_len {
-            writer.write_bits(reader.read_bits(1)?, 1)?;
+        self.write_range_to(writer, 0, self.bit_len)
+    }
+
+    /// Copies an MSB-first bit range into a writer without narrowing the value.
+    pub(crate) fn write_range_to(
+        &self,
+        writer: &mut BitWriter,
+        start: usize,
+        bits: usize,
+    ) -> Result<()> {
+        if start > self.bit_len || bits > self.bit_len - start {
+            return Err(SchcError::BitOutOfBounds {
+                position: start,
+                requested: bits,
+                available: self.bit_len.saturating_sub(start),
+            });
         }
-        Ok(())
+        let mut reader = BitReader::new(self.bytes());
+        reader.set_position(start)?;
+        reader.copy_to(writer, bits)
     }
 
     pub(crate) fn bytes(&self) -> &[u8] {
