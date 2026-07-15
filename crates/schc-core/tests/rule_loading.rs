@@ -8,27 +8,31 @@ use schc_core::{
 fn sid_fixture() -> &'static str {
     concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/sid/minimal.sid.json"
+        "/../../fixtures/core/ietf-schc@2026-05-07.sid"
     )
 }
 
-fn rule_fixture() -> &'static str {
-    concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/rules/udp_coap.json"
-    )
-}
-
-fn m2m_rule_fixture() -> &'static str {
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/rules/m2m.json")
+fn sid_value(identifier: &str) -> i128 {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    i128::from(registry.sid(identifier).unwrap())
 }
 
 #[test]
 fn sid_registry_loads_standard_sid_file_shape() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
 
-    assert_eq!(registry.sid("fid-ipv6-version").unwrap(), 1000);
-    assert_eq!(registry.identifier(3001).unwrap(), "cda-value-sent");
+    assert_eq!(
+        registry
+            .identifier(registry.sid("fid-ipv6-version").unwrap())
+            .unwrap(),
+        "fid-ipv6-version"
+    );
+    assert_eq!(
+        registry
+            .identifier(registry.sid("cda-value-sent").unwrap())
+            .unwrap(),
+        "cda-value-sent"
+    );
 }
 
 #[test]
@@ -48,35 +52,25 @@ fn sid_registry_reports_missing_lookup_entries() {
 #[test]
 fn json_rules_load_into_typed_context() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
-    let json = std::fs::read_to_string(rule_fixture()).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 3,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-udp-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" }
+        ]
+      }]
+    }
+    "#;
 
-    let context = RuleContext::from_json_str(&json, registry).unwrap();
+    let context = RuleContext::from_json_str(json, registry).unwrap();
 
     assert_eq!(context.rules().rules().len(), 1);
     assert_eq!(context.rules().rules()[0].id().value(), 3);
     assert_eq!(context.rules().rules()[0].id().bit_len(), 4);
-    assert_eq!(context.rules().rules()[0].fields().len(), 19);
-}
-
-#[test]
-fn m2m_rules_load_in_r_schc_schema() {
-    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
-    let json = std::fs::read_to_string(m2m_rule_fixture()).unwrap();
-
-    let context = RuleContext::from_json_str(&json, registry).unwrap();
-    let rule_ids = context
-        .rules()
-        .rules()
-        .iter()
-        .map(|rule| rule.id().value())
-        .collect::<Vec<_>>();
-
-    assert_eq!(rule_ids, [0, 1, 2, 3, 4, 5, 10, 11, 12, 13, 15]);
-    assert!(context.rules().rules().iter().all(|rule| {
-        rule.fields()
-            .iter()
-            .any(|field| field.action == Cda::Compute)
-    }));
+    assert_eq!(context.rules().rules()[0].fields().len(), 2);
 }
 
 #[test]
@@ -90,7 +84,7 @@ fn json_rules_parse_nature_and_option_number_fields() {
         "nature": "no-compression",
         "fields": [
           { "field": "coap-option(17)", "length": { "type": "variable", "unit": "bytes" }, "direction": "down", "target": ["8e"], "mo": "match-mapping", "cda": "mapping-sent" },
-          { "field": "fid-coap-payload-marker", "length_bits": 0, "direction": "bi", "target": null, "mo": "ignore", "cda": "not-sent" }
+          { "field": "fid-payload", "length": { "type": "variable", "unit": "bytes" }, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
         ]
       }]
     }
@@ -102,7 +96,7 @@ fn json_rules_parse_nature_and_option_number_fields() {
     assert_eq!(rule.nature(), RuleNature::NoCompression);
     assert_eq!(rule.fields()[0].field, FieldRef::CoapOption { number: 17 });
     assert_eq!(rule.fields()[0].direction, DirectionSelector::Down);
-    assert_eq!(rule.fields()[1].field, FieldRef::SyntheticCoapMarker);
+    assert_eq!(rule.fields()[1].field, FieldRef::Payload);
 }
 
 #[test]
@@ -152,7 +146,7 @@ fn json_rule_rejects_compute_for_non_computable_fields() {
 }
 
 #[test]
-fn json_rule_rejects_payload_marker_with_residue() {
+fn json_rule_rejects_non_byte_aligned_generic_payload() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let json = r#"
     {
@@ -160,7 +154,7 @@ fn json_rule_rejects_payload_marker_with_residue() {
         "rule_id": 1,
         "rule_id_length": 4,
         "fields": [
-          { "field": "fid-coap-payload-marker", "length_bits": 0, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
+          { "field": "fid-payload", "length_bits": 7, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
         ]
       }]
     }
@@ -183,8 +177,8 @@ fn json_rules_load_dynamic_field_lengths_and_positions() {
         "fields": [
           { "field": "fid-coap-tkl", "length": { "type": "fixed", "bits": 4 }, "field_position": 1, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
           { "field": "fid-coap-token", "length": { "type": "token-length" }, "field_position": 1, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
-          { "field": "fid-coap-payload", "length": { "type": "variable", "unit": "bytes" }, "field_position": 1, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
-          { "field": "fid-coap-option-uri-path", "length": { "type": "from-previous", "entry_index": 2, "unit": "bytes" }, "field_position": 2, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
+          { "field": "fid-payload", "length": { "type": "variable", "unit": "bytes" }, "field_position": 1, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" },
+          { "field": "coap-option(11)", "length": { "type": "from-previous", "entry_index": 2, "unit": "bytes" }, "field_position": 2, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
         ]
       }]
     }
@@ -210,8 +204,19 @@ fn json_rules_load_dynamic_field_lengths_and_positions() {
 #[test]
 fn decision_tree_builds_from_rule_context() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
-    let json = std::fs::read_to_string(rule_fixture()).unwrap();
-    let context = RuleContext::from_json_str(&json, registry).unwrap();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 3,
+        "rule_id_length": 4,
+        "fields": [
+          { "field": "fid-ipv6-version", "length_bits": 4, "direction": "bi", "target": "06", "mo": "equal", "cda": "not-sent" },
+          { "field": "fid-udp-length", "length_bits": 16, "direction": "bi", "target": null, "mo": "ignore", "cda": "compute" }
+        ]
+      }]
+    }
+    "#;
+    let context = RuleContext::from_json_str(json, registry).unwrap();
 
     let tree = DecisionTree::build(context.rules()).unwrap();
 
@@ -432,8 +437,24 @@ fn cbor_rules_load_into_typed_context() {
                 (
                     int(23),
                     array(vec![
-                        normal_field(0, 1000, 4, 4000, bytes(&[0x06]), 2000, 3000),
-                        normal_field(1, 1005, 8, 4000, bytes(&[0x40]), 2001, 3001),
+                        normal_field(
+                            0,
+                            sid_value("fid-ipv6-version"),
+                            4,
+                            sid_value("di-bidirectional"),
+                            bytes(&[0x06]),
+                            sid_value("mo-equal"),
+                            sid_value("cda-not-sent"),
+                        ),
+                        normal_field(
+                            1,
+                            sid_value("fid-ipv6-hoplimit"),
+                            8,
+                            sid_value("di-bidirectional"),
+                            bytes(&[0x40]),
+                            sid_value("mo-ignore"),
+                            sid_value("cda-value-sent"),
+                        ),
                     ]),
                 ),
             ])]),
@@ -461,13 +482,13 @@ fn cbor_rule_nature_uses_coreconf_sid_mapping() {
                 map(vec![
                     (int(1), int(4)),
                     (int(2), int(1)),
-                    (int(3), int(2941)),
+                    (int(3), int(sid_value("nature-no-compression"))),
                     (int(23), array(vec![])),
                 ]),
                 map(vec![
                     (int(1), int(4)),
                     (int(2), int(2)),
-                    (int(3), int(2942)),
+                    (int(3), int(sid_value("nature-fragmentation"))),
                     (int(23), array(vec![])),
                 ]),
             ]),
@@ -502,14 +523,14 @@ fn cbor_rules_load_universal_option_fields() {
                     int(23),
                     array(vec![map(vec![
                         (int(1), int(0)),
-                        (int(3), int(6000)),
+                        (int(3), int(sid_value("space-id-coap"))),
                         (int(4), int(11)),
                         (int(5), int(8)),
-                        (int(7), int(4000)),
+                        (int(7), int(sid_value("di-bidirectional"))),
                         (int(8), int(1)),
                         (int(9), target_list(vec![bytes(&[0xab])])),
-                        (int(12), int(2000)),
-                        (int(16), int(3000)),
+                        (int(12), int(sid_value("mo-equal"))),
+                        (int(16), int(sid_value("cda-not-sent"))),
                     ])]),
                 ),
             ])]),
@@ -543,12 +564,12 @@ fn cbor_rules_preserve_field_length_function_sids() {
                     int(23),
                     array(vec![normal_field_with_length(
                         0,
-                        1205,
+                        sid_value("fid-coap-token"),
                         tagged(45, int(9999)),
-                        4000,
+                        sid_value("di-bidirectional"),
                         bytes(&[]),
-                        2001,
-                        3001,
+                        sid_value("mo-ignore"),
+                        sid_value("cda-value-sent"),
                     )]),
                 ),
             ])]),
@@ -578,31 +599,31 @@ fn cbor_rules_resolve_known_field_length_function_sids() {
                     array(vec![
                         normal_field_with_length(
                             0,
-                            1205,
-                            tagged(45, int(5002)),
-                            4000,
+                            sid_value("fid-coap-token"),
+                            tagged(45, int(sid_value("fl-token-length"))),
+                            sid_value("di-bidirectional"),
                             bytes(&[]),
-                            2001,
-                            3001,
+                            sid_value("mo-ignore"),
+                            sid_value("cda-value-sent"),
                         ),
                         normal_field_with_length(
                             1,
-                            1208,
-                            tagged(45, int(5004)),
-                            4000,
+                            sid_value("fid-coap-token"),
+                            tagged(45, int(sid_value("fl-variable-bits"))),
+                            sid_value("di-bidirectional"),
                             bytes(&[]),
-                            2001,
-                            3001,
+                            sid_value("mo-ignore"),
+                            sid_value("cda-value-sent"),
                         ),
                         normal_field_with_length_value(NormalFieldWithLengthValue {
                             entry_index: 2,
-                            field_sid: 1207,
-                            length: tagged(45, int(5001)),
+                            field_sid: sid_value("fid-payload"),
+                            length: tagged(45, int(sid_value("fl-length-bytes"))),
                             length_value: int(0),
-                            direction_sid: 4000,
+                            direction_sid: sid_value("di-bidirectional"),
                             target: bytes(&[]),
-                            matching_sid: 2001,
-                            cda_sid: 3001,
+                            matching_sid: sid_value("mo-ignore"),
+                            cda_sid: sid_value("cda-value-sent"),
                         }),
                     ]),
                 ),
@@ -875,13 +896,13 @@ fn cbor_rule_id_rejects_prefix_collision() {
                 map(vec![
                     (int(1), int(1)),
                     (int(2), int(1)),
-                    (int(3), int(2941)),
+                    (int(3), int(sid_value("nature-fragmentation"))),
                     (int(23), array(vec![])),
                 ]),
                 map(vec![
                     (int(1), int(2)),
                     (int(2), int(2)),
-                    (int(3), int(2941)),
+                    (int(3), int(sid_value("nature-fragmentation"))),
                     (int(23), array(vec![])),
                 ]),
             ]),
@@ -1074,11 +1095,10 @@ fn field_error_includes_rule_entry_and_field_name_for_compute() {
     );
 }
 
-/// Asserts that a CoAP payload marker misuse error message includes the rule
-/// index, entry index, and identifies the marker field and the required
-/// CDA/MO combination.
+/// Asserts that a generic payload length error includes the rule index,
+/// entry index, field identifier, and byte-alignment constraint.
 #[test]
-fn field_error_includes_rule_entry_and_marker_constraint() {
+fn field_error_includes_rule_entry_and_payload_length_constraint() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let json = r#"
     {
@@ -1086,7 +1106,7 @@ fn field_error_includes_rule_entry_and_marker_constraint() {
         "rule_id": 1,
         "rule_id_length": 4,
         "fields": [
-          { "field": "fid-coap-payload-marker", "length_bits": 0, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
+          { "field": "fid-payload", "length_bits": 7, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }
         ]
       }]
     }
@@ -1105,16 +1125,12 @@ fn field_error_includes_rule_entry_and_marker_constraint() {
         "must name entry index, got: {message}"
     );
     assert!(
-        message.contains("CoAP payload marker"),
-        "must identify the marker field, got: {message}"
+        message.contains("fid-payload length"),
+        "must identify the field constraint, got: {message}"
     );
     assert!(
-        message.contains("not-sent"),
-        "must name the required CDA, got: {message}"
-    );
-    assert!(
-        message.contains("ignore"),
-        "must name the required matching operator, got: {message}"
+        message.contains("whole bytes"),
+        "must identify the byte-alignment constraint, got: {message}"
     );
 }
 

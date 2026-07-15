@@ -5,7 +5,7 @@ use schc_core::{
 fn registry() -> SidRegistry {
     SidRegistry::load_path(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/sid/minimal.sid.json"
+        "/../../fixtures/core/ietf-schc@2026-05-07.sid"
     ))
     .unwrap()
 }
@@ -531,17 +531,6 @@ fn malformed_scope_and_truncated_error_are_rejected() {
         error,
         SchcError::Packet { .. } | SchcError::NoMatchingRule
     ));
-}
-
-#[test]
-fn independent_sid_fixture_resolves_generic_identities() {
-    let registry = SidRegistry::load_path(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/sid/generic-payload.sid.json"
-    ))
-    .unwrap();
-    assert_eq!(registry.sid("fid-unused").unwrap(), 1700);
-    assert_eq!(registry.identifier(1701).unwrap(), "fid-payload");
 }
 
 #[test]

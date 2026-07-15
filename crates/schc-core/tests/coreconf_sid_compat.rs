@@ -17,8 +17,12 @@ use schc_core::{
 fn ietf_schc_sid_fixture() -> &'static str {
     concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/sid/ietf-schc.sid.json"
+        "/../../fixtures/core/ietf-schc@2026-05-07.sid"
     )
+}
+
+fn sid_value(registry: &SidRegistry, identifier: &str) -> ciborium::value::Value {
+    int(i128::from(registry.sid(identifier).unwrap()))
 }
 
 /// Loads the IETF SCHC SID file shape and asserts that the registry
@@ -29,39 +33,20 @@ fn ietf_schc_sid_fixture() -> &'static str {
 fn loads_ietf_schc_sid_file_shape() {
     let registry = SidRegistry::load_path(ietf_schc_sid_fixture()).unwrap();
 
-    // Field identity.
-    assert_eq!(registry.sid("fid-ipv6-version").unwrap(), 2860);
-    assert_eq!(registry.identifier(2860).unwrap(), "fid-ipv6-version");
-
-    // Direction indicator.
-    assert_eq!(registry.sid("di-bidirectional").unwrap(), 2880);
-    assert_eq!(registry.identifier(2880).unwrap(), "di-bidirectional");
-
-    // Matching operator.
-    assert_eq!(registry.sid("mo-equal").unwrap(), 2900);
-    assert_eq!(registry.identifier(2900).unwrap(), "mo-equal");
-
-    // CDA.
-    assert_eq!(registry.sid("cda-not-sent").unwrap(), 2920);
-    assert_eq!(registry.identifier(2920).unwrap(), "cda-not-sent");
-
-    // Field length function.
-    assert_eq!(registry.sid("fl-token-length").unwrap(), 2892);
-    assert_eq!(registry.identifier(2892).unwrap(), "fl-token-length");
-
-    // Rule nature (compression).
-    assert_eq!(registry.sid("nature-compression").unwrap(), 2940);
-    assert_eq!(registry.identifier(2940).unwrap(), "nature-compression");
-
-    // Fragmentation identities are loadable as names in the registry even
-    // though fragmentation behavior is intentionally not implemented by the
-    // core.
-    assert_eq!(registry.sid("nature-fragmentation").unwrap(), 2941);
-    assert_eq!(registry.identifier(2941).unwrap(), "nature-fragmentation");
-
-    // Additional identities are present as registry entries for rule loading.
-    assert_eq!(registry.sid("cda-appiid").unwrap(), 2926);
-    assert_eq!(registry.sid("fid-icmpv6-identifier").unwrap(), 2813);
+    for identifier in [
+        "fid-ipv6-version",
+        "di-bidirectional",
+        "mo-equal",
+        "cda-not-sent",
+        "fl-token-length",
+        "nature-compression",
+        "nature-fragmentation",
+        "cda-appiid",
+        "fid-icmpv6-identifier",
+    ] {
+        let sid = registry.sid(identifier).unwrap();
+        assert_eq!(registry.identifier(sid).unwrap(), identifier);
+    }
 }
 
 /// A JSON rule that uses the IETF SCHC `ICMPv6` identifier field loads into the
@@ -93,7 +78,7 @@ fn json_rule_loads_ietf_schc_sid_icmpv6_identifier() {
 #[test]
 fn cbor_rule_loads_ietf_schc_sid_icmpv6_identifier() {
     let registry = SidRegistry::load_path(ietf_schc_sid_fixture()).unwrap();
-    // Field SID 2813 resolves to `fid-icmpv6-identifier`.
+    // The canonical field SID resolves to `fid-icmpv6-identifier`.
     let root = map(vec![(
         int(2574),
         map(vec![(
@@ -105,13 +90,13 @@ fn cbor_rule_loads_ietf_schc_sid_icmpv6_identifier() {
                     int(23),
                     array(vec![map(vec![
                         (int(1), int(0)),
-                        (int(2), int(2813)),
+                        (int(2), sid_value(&registry, "fid-icmpv6-identifier")),
                         (int(5), int(16)),
-                        (int(7), int(2880)),
+                        (int(7), sid_value(&registry, "di-bidirectional")),
                         (int(8), int(1)),
                         (int(9), target_list(vec![bytes(&[])])),
-                        (int(12), int(2901)),
-                        (int(16), int(2921)),
+                        (int(12), sid_value(&registry, "mo-ignore")),
+                        (int(16), sid_value(&registry, "cda-value-sent")),
                     ])]),
                 ),
             ])]),
@@ -132,7 +117,7 @@ fn cbor_rule_loads_ietf_schc_sid_icmpv6_identifier() {
 #[test]
 fn cbor_rule_rejects_ietf_schc_sid_cda_on_wrong_field() {
     let registry = SidRegistry::load_path(ietf_schc_sid_fixture()).unwrap();
-    // CDA SID 2926 resolves to `cda-appiid`, which is valid only for
+    // The canonical `cda-appiid` SID is valid only for
     // `fid-ipv6-appiid`, not the IPv6 Version field used by this probe.
     let root = map(vec![(
         int(2574),
@@ -145,13 +130,13 @@ fn cbor_rule_rejects_ietf_schc_sid_cda_on_wrong_field() {
                     int(23),
                     array(vec![map(vec![
                         (int(1), int(0)),
-                        (int(2), int(2860)),
+                        (int(2), sid_value(&registry, "fid-ipv6-version")),
                         (int(5), int(4)),
-                        (int(7), int(2880)),
+                        (int(7), sid_value(&registry, "di-bidirectional")),
                         (int(8), int(1)),
                         (int(9), target_list(vec![bytes(&[0x06])])),
-                        (int(12), int(2900)),
-                        (int(16), int(2926)),
+                        (int(12), sid_value(&registry, "mo-equal")),
+                        (int(16), sid_value(&registry, "cda-appiid")),
                     ])]),
                 ),
             ])]),

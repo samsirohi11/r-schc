@@ -15,8 +15,17 @@ use schc_core::{
 fn sid_fixture() -> &'static str {
     concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/sid/minimal.sid.json"
+        "/../../fixtures/core/ietf-schc@2026-05-07.sid"
     )
+}
+
+fn sid_value(identifier: &str) -> i128 {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    i128::from(registry.sid(identifier).unwrap())
+}
+
+fn sid_cbor(identifier: &str) -> ciborium::value::Value {
+    int(sid_value(identifier))
 }
 
 /// Builds a minimal CORECONF CBOR rule with one compression rule and two
@@ -36,27 +45,27 @@ fn coreconf_rule() -> ciborium::value::Value {
                     array(vec![
                         normal_coreconf_field(CoreconfField {
                             entry_index: 0,
-                            field_sid: 1000,
+                            field_sid: sid_value("fid-ipv6-version"),
                             length: int(4),
                             length_value: None,
-                            direction_sid: 4000,
+                            direction_sid: sid_value("di-bidirectional"),
                             field_position: 1,
                             target: Some(target_list(vec![bytes(&[0x06])])),
-                            matching_sid: 2000,
+                            matching_sid: sid_value("mo-equal"),
                             matching_value: None,
-                            cda_sid: 3000,
+                            cda_sid: sid_value("cda-not-sent"),
                         }),
                         normal_coreconf_field(CoreconfField {
                             entry_index: 1,
-                            field_sid: 1005,
+                            field_sid: sid_value("fid-ipv6-hoplimit"),
                             length: int(8),
                             length_value: None,
-                            direction_sid: 4000,
+                            direction_sid: sid_value("di-bidirectional"),
                             field_position: 1,
                             target: Some(target_list(vec![bytes(&[0x40])])),
-                            matching_sid: 2002,
+                            matching_sid: sid_value("mo-msb"),
                             matching_value: Some(target_list(vec![bytes(&[0x04])])),
-                            cda_sid: 3003,
+                            cda_sid: sid_value("cda-lsb"),
                         }),
                     ]),
                 ),
@@ -104,7 +113,7 @@ fn loads_ietf_schc_coreconf_field_key_layout() {
 #[test]
 fn coreconf_field_length_function_uses_key_5_and_6() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
-    // Field length is a tagged function SID (fl-token-length = 5002) with no
+    // Field length is a tagged function SID (fl-token-length) with no
     // field-length-value.
     // This verifies that key 5 carries the length and key 6 is the optional length-value.
     let root = map(vec![(
@@ -118,15 +127,15 @@ fn coreconf_field_length_function_uses_key_5_and_6() {
                     int(23),
                     array(vec![normal_coreconf_field(CoreconfField {
                         entry_index: 0,
-                        field_sid: 1205,
-                        length: tagged(45, int(5002)),
+                        field_sid: sid_value("fid-coap-token"),
+                        length: tagged(45, sid_cbor("fl-token-length")),
                         length_value: None,
-                        direction_sid: 4000,
+                        direction_sid: sid_value("di-bidirectional"),
                         field_position: 1,
                         target: Some(target_list(vec![bytes(&[])])),
-                        matching_sid: 2001,
+                        matching_sid: sid_value("mo-ignore"),
                         matching_value: None,
-                        cda_sid: 3001,
+                        cda_sid: sid_value("cda-value-sent"),
                     })]),
                 ),
             ])]),
@@ -149,10 +158,10 @@ fn universal_coreconf_entry_accepts_optional_target_for_ignore_value_sent() {
         entry_index: 0,
         option_number: 11,
         target: None,
-        matching_sid: 2001,
+        matching_sid: sid_value("mo-ignore"),
         matching_value: None,
-        cda_sid: 3001,
-        space_sid: 6000,
+        cda_sid: sid_value("cda-value-sent"),
+        space_sid: sid_value("space-id-coap"),
     })]);
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
@@ -167,16 +176,27 @@ fn universal_coreconf_entry_accepts_optional_target_for_ignore_value_sent() {
 #[test]
 fn normal_coreconf_entries_accept_optional_targets_when_semantics_allow() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
-    for (field_sid, length, cda_sid) in [(1005, 8, 3001), (1003, 16, 3004)] {
+    for (field_sid, length, cda_sid) in [
+        (
+            sid_value("fid-ipv6-hoplimit"),
+            8,
+            sid_value("cda-value-sent"),
+        ),
+        (
+            sid_value("fid-ipv6-payload-length"),
+            16,
+            sid_value("cda-compute"),
+        ),
+    ] {
         let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
             entry_index: 0,
             field_sid,
             length: int(length),
             length_value: None,
-            direction_sid: 4000,
+            direction_sid: sid_value("di-bidirectional"),
             field_position: 1,
             target: None,
-            matching_sid: 2001,
+            matching_sid: sid_value("mo-ignore"),
             matching_value: None,
             cda_sid,
         })]);
@@ -196,15 +216,15 @@ fn coreconf_entry_rejects_missing_target_for_equal_matching() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
         entry_index: 0,
-        field_sid: 1000,
+        field_sid: sid_value("fid-ipv6-version"),
         length: int(4),
         length_value: None,
-        direction_sid: 4000,
+        direction_sid: sid_value("di-bidirectional"),
         field_position: 1,
         target: None,
-        matching_sid: 2000,
+        matching_sid: sid_value("mo-equal"),
         matching_value: None,
-        cda_sid: 3000,
+        cda_sid: sid_value("cda-not-sent"),
     })]);
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
@@ -218,15 +238,15 @@ fn coreconf_entry_rejects_missing_target_for_not_sent() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
         entry_index: 0,
-        field_sid: 1005,
+        field_sid: sid_value("fid-ipv6-hoplimit"),
         length: int(8),
         length_value: None,
-        direction_sid: 4000,
+        direction_sid: sid_value("di-bidirectional"),
         field_position: 1,
         target: None,
-        matching_sid: 2001,
+        matching_sid: sid_value("mo-ignore"),
         matching_value: None,
-        cda_sid: 3000,
+        cda_sid: sid_value("cda-not-sent"),
     })]);
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
@@ -242,10 +262,10 @@ fn universal_coreconf_entry_rejects_unsupported_space() {
         entry_index: 0,
         option_number: 11,
         target: Some(target_list(vec![bytes(&[0xab])])),
-        matching_sid: 2000,
+        matching_sid: sid_value("mo-equal"),
         matching_value: None,
-        cda_sid: 3000,
-        space_sid: 1000,
+        cda_sid: sid_value("cda-not-sent"),
+        space_sid: sid_value("fid-ipv6-version"),
     })]);
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
@@ -266,10 +286,10 @@ fn universal_value_is_not_narrowed_during_rule_loading() {
         entry_index: 0,
         option_number: i128::from(u32::MAX) + 1,
         target: None,
-        matching_sid: 2001,
+        matching_sid: sid_value("mo-ignore"),
         matching_value: None,
-        cda_sid: 3001,
-        space_sid: 6000,
+        cda_sid: sid_value("cda-value-sent"),
+        space_sid: sid_value("space-id-coap"),
     })]);
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
@@ -286,13 +306,16 @@ fn universal_value_is_not_narrowed_during_rule_loading() {
 #[test]
 fn singleton_mapping_target_preserves_mapping_shape() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
-    for (matching_sid, cda_sid) in [(2003, 3001), (2001, 3002)] {
+    for (matching_sid, cda_sid) in [
+        (sid_value("mo-match-mapping"), sid_value("cda-value-sent")),
+        (sid_value("mo-ignore"), sid_value("cda-mapping-sent")),
+    ] {
         let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
             entry_index: 0,
-            field_sid: 1000,
+            field_sid: sid_value("fid-ipv6-version"),
             length: int(8),
             length_value: None,
-            direction_sid: 4000,
+            direction_sid: sid_value("di-bidirectional"),
             field_position: 1,
             target: Some(target_list(vec![bytes(&[0xab])])),
             matching_sid,
@@ -315,15 +338,15 @@ fn empty_mapping_target_is_rejected() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
         entry_index: 0,
-        field_sid: 1000,
+        field_sid: sid_value("fid-ipv6-version"),
         length: int(8),
         length_value: None,
-        direction_sid: 4000,
+        direction_sid: sid_value("di-bidirectional"),
         field_position: 1,
         target: Some(target_list(vec![])),
-        matching_sid: 2003,
+        matching_sid: sid_value("mo-match-mapping"),
         matching_value: None,
-        cda_sid: 3002,
+        cda_sid: sid_value("cda-mapping-sent"),
     })]);
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
@@ -337,18 +360,18 @@ fn target_mapping_is_ordered_by_explicit_index() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
         entry_index: 0,
-        field_sid: 1000,
+        field_sid: sid_value("fid-ipv6-version"),
         length: int(8),
         length_value: None,
-        direction_sid: 4000,
+        direction_sid: sid_value("di-bidirectional"),
         field_position: 1,
         target: Some(target_list_with_indexes(vec![
             (1, bytes(&[0xcd])),
             (0, bytes(&[0xab])),
         ])),
-        matching_sid: 2003,
+        matching_sid: sid_value("mo-match-mapping"),
         matching_value: None,
-        cda_sid: 3002,
+        cda_sid: sid_value("cda-mapping-sent"),
     })]);
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
@@ -365,18 +388,18 @@ fn duplicate_target_indexes_are_rejected() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
         entry_index: 0,
-        field_sid: 1000,
+        field_sid: sid_value("fid-ipv6-version"),
         length: int(8),
         length_value: None,
-        direction_sid: 4000,
+        direction_sid: sid_value("di-bidirectional"),
         field_position: 1,
         target: Some(target_list_with_indexes(vec![
             (0, bytes(&[0xab])),
             (0, bytes(&[0xcd])),
         ])),
-        matching_sid: 2003,
+        matching_sid: sid_value("mo-match-mapping"),
         matching_value: None,
-        cda_sid: 3002,
+        cda_sid: sid_value("cda-mapping-sent"),
     })]);
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
@@ -393,15 +416,15 @@ fn non_consecutive_target_indexes_are_rejected() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let root = rule_with_fields(vec![normal_coreconf_field(CoreconfField {
         entry_index: 0,
-        field_sid: 1000,
+        field_sid: sid_value("fid-ipv6-version"),
         length: int(8),
         length_value: None,
-        direction_sid: 4000,
+        direction_sid: sid_value("di-bidirectional"),
         field_position: 1,
         target: Some(target_list_with_indexes(vec![(1, bytes(&[0xab]))])),
-        matching_sid: 2003,
+        matching_sid: sid_value("mo-match-mapping"),
         matching_value: None,
-        cda_sid: 3002,
+        cda_sid: sid_value("cda-mapping-sent"),
     })]);
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
@@ -416,27 +439,27 @@ fn cbor_entries_are_normalized_by_explicit_entry_index() {
     let root = rule_with_fields(vec![
         normal_coreconf_field(CoreconfField {
             entry_index: 1,
-            field_sid: 1005,
+            field_sid: sid_value("fid-ipv6-hoplimit"),
             length: int(8),
             length_value: None,
-            direction_sid: 4000,
+            direction_sid: sid_value("di-bidirectional"),
             field_position: 1,
             target: Some(target_list(vec![bytes(&[0xff])])),
-            matching_sid: 2000,
+            matching_sid: sid_value("mo-equal"),
             matching_value: None,
-            cda_sid: 3000,
+            cda_sid: sid_value("cda-not-sent"),
         }),
         normal_coreconf_field(CoreconfField {
             entry_index: 0,
-            field_sid: 1000,
+            field_sid: sid_value("fid-ipv6-version"),
             length: int(4),
             length_value: None,
-            direction_sid: 4000,
+            direction_sid: sid_value("di-bidirectional"),
             field_position: 1,
             target: Some(target_list(vec![bytes(&[0x06])])),
-            matching_sid: 2000,
+            matching_sid: sid_value("mo-equal"),
             matching_value: None,
-            cda_sid: 3000,
+            cda_sid: sid_value("cda-not-sent"),
         }),
     ]);
     let mut cbor = Vec::new();
@@ -456,27 +479,27 @@ fn duplicate_field_entry_indexes_are_rejected() {
     let root = rule_with_fields(vec![
         normal_coreconf_field(CoreconfField {
             entry_index: 0,
-            field_sid: 1000,
+            field_sid: sid_value("fid-ipv6-version"),
             length: int(4),
             length_value: None,
-            direction_sid: 4000,
+            direction_sid: sid_value("di-bidirectional"),
             field_position: 1,
             target: Some(target_list(vec![bytes(&[0x06])])),
-            matching_sid: 2000,
+            matching_sid: sid_value("mo-equal"),
             matching_value: None,
-            cda_sid: 3000,
+            cda_sid: sid_value("cda-not-sent"),
         }),
         normal_coreconf_field(CoreconfField {
             entry_index: 0,
-            field_sid: 1005,
+            field_sid: sid_value("fid-ipv6-hoplimit"),
             length: int(8),
             length_value: None,
-            direction_sid: 4000,
+            direction_sid: sid_value("di-bidirectional"),
             field_position: 1,
             target: Some(target_list(vec![bytes(&[0xff])])),
-            matching_sid: 2000,
+            matching_sid: sid_value("mo-equal"),
             matching_value: None,
-            cda_sid: 3000,
+            cda_sid: sid_value("cda-not-sent"),
         }),
     ]);
     let mut cbor = Vec::new();
@@ -494,15 +517,15 @@ fn rejects_entries_with_both_field_identity_forms() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let root = rule_with_fields(vec![map(vec![
         (int(1), int(0)),
-        (int(2), int(1000)),
-        (int(3), int(6000)),
+        (int(2), sid_cbor("fid-ipv6-version")),
+        (int(3), sid_cbor("space-id-coap")),
         (int(4), int(11)),
         (int(5), int(4)),
-        (int(7), int(4000)),
+        (int(7), sid_cbor("di-bidirectional")),
         (int(8), int(1)),
         (int(9), target_list(vec![bytes(&[0x06])])),
-        (int(12), int(2000)),
-        (int(16), int(3000)),
+        (int(12), sid_cbor("mo-equal")),
+        (int(16), sid_cbor("cda-not-sent")),
     ])]);
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
@@ -531,11 +554,11 @@ fn rejects_entries_without_current_field_identity_keys() {
                     array(vec![map(vec![
                         (int(1), int(0)),
                         (int(5), int(4)),
-                        (int(7), int(4000)),
+                        (int(7), sid_cbor("di-bidirectional")),
                         (int(8), int(1)),
                         (int(9), target_list(vec![bytes(&[0x06])])),
-                        (int(12), int(2000)),
-                        (int(16), int(3000)),
+                        (int(12), sid_cbor("mo-equal")),
+                        (int(16), sid_cbor("cda-not-sent")),
                     ])]),
                 ),
             ])]),
@@ -596,7 +619,7 @@ fn universal_coreconf_field(field: UniversalField) -> ciborium::value::Value {
         (int(3), int(field.space_sid)),
         (int(4), int(field.option_number)),
         (int(5), int(8)),
-        (int(7), int(4000)),
+        (int(7), sid_cbor("di-bidirectional")),
         (int(8), int(1)),
         (int(12), int(field.matching_sid)),
         (int(16), int(field.cda_sid)),

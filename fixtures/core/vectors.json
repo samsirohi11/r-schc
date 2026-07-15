@@ -1,0 +1,164 @@
+{
+  "provenance": {
+    "schema_version": 1,
+    "canonical_sid": {
+      "revision": "ietf-schc@2026-05-07",
+      "sha256": "9053856d017170092aa066f47d559169df87b71c0b32e7b702542c2b37eb78ff"
+    },
+    "generator": "tools/regenerate_core_sor.py",
+    "contract": "Expected vectors are committed regression and interoperability contracts."
+  },
+  "vectors": [
+    {
+      "name": "udp-coap-token-options-variable-bit",
+      "rule_id": 16,
+      "packet_hex": "600000000015114020010db800000000000000000000000120010db80000000000000000000000021633163300156bb742011234aabbb163118dff4f4b",
+      "compressed_hex": "100848d2aaec24f4b0",
+      "bit_len": 68,
+      "direction": "up",
+      "receiver_position": "core",
+      "coverage": [
+        "UDP/CoAP",
+        "token-length",
+        "universal CoAP option 11 match-mapping/mapping-sent",
+        "universal CoAP option 12 variable-bit mapping",
+        "generic PAYLOAD"
+      ]
+    },
+    {
+      "name": "udp-header-only-unread-payload",
+      "rule_id": 17,
+      "packet_hex": "60000000000e114020010db800000000000000000000000120010db800000000000000000000000216331633000e2ebf756e72656164",
+      "compressed_hex": "11756e72656164",
+      "bit_len": 56,
+      "direction": "up",
+      "receiver_position": "core",
+      "coverage": [
+        "UDP header-only compression",
+        "unread byte-aligned payload suffix"
+      ]
+    },
+    {
+      "name": "udp-msb-lsb-payload",
+      "rule_id": 18,
+      "packet_hex": "600000000016114020010db800000000000000000000000120010db8000000000000000000000002163416330016a40b6162636465666768696a6b6c6d6e",
+      "compressed_hex": "12f7062636465666768696a6b6c6d6e0",
+      "bit_len": 124,
+      "direction": "up",
+      "receiver_position": "core",
+      "coverage": [
+        "UDP MSB matching",
+        "generic PAYLOAD LSB residue",
+        "variable-bit payload length"
+      ]
+    },
+    {
+      "name": "udp-sent-checksum",
+      "rule_id": 19,
+      "packet_hex": "60000000000d114020010db800000000000000000000000120010db800000000000000000000000216351633000d342568656c6c6f",
+      "compressed_hex": "133425568656c6c6f0",
+      "bit_len": 68,
+      "direction": "up",
+      "receiver_position": "core",
+      "coverage": [
+        "UDP checksum value-sent",
+        "generic PAYLOAD residue"
+      ]
+    },
+    {
+      "name": "icmpv6-echo-identifier-sequence",
+      "rule_id": 20,
+      "packet_hex": "60000000000c3a4020010db800000000000000000000000120010db80000000000000000000000028000333e1234000170696e67",
+      "compressed_hex": "1412340001470696e670",
+      "bit_len": 76,
+      "direction": "up",
+      "receiver_position": "core",
+      "coverage": [
+        "ICMPv6 Echo Request",
+        "Identifier",
+        "Sequence",
+        "ICMPv6 checksum",
+        "ICMPv6 payload"
+      ]
+    },
+    {
+      "name": "icmpv6-destination-unreachable-embedded-udp",
+      "rule_id": 21,
+      "packet_hex": "6000000000383a2020010db800000000000000000000000220010db8000000000000000000000001010431260000000060000000000811ff20010db800000000000000000000000120010db80000000000000000000000021633163300087803",
+      "compressed_hex": "15",
+      "bit_len": 8,
+      "direction": "down",
+      "receiver_position": "device",
+      "coverage": [
+        "ICMPv6 Destination Unreachable",
+        "UNUSED",
+        "embedded IPv6 fields at FP2",
+        "embedded UDP fields at FP2",
+        "downlink"
+      ]
+    },
+    {
+      "name": "icmpv6-packet-too-big-mtu-embedded-udp",
+      "rule_id": 22,
+      "packet_hex": "6000000000383a2020010db800000000000000000000000220010db800000000000000000000000102002b2a0000050060000000000811ff20010db800000000000000000000000120010db80000000000000000000000021633163300087803",
+      "compressed_hex": "16",
+      "bit_len": 8,
+      "direction": "down",
+      "receiver_position": "device",
+      "coverage": [
+        "ICMPv6 Packet Too Big",
+        "MTU",
+        "embedded IPv6 fields at FP2",
+        "embedded UDP fields at FP2",
+        "downlink"
+      ]
+    },
+    {
+      "name": "icmpv6-parameter-problem-pointer-embedded-udp",
+      "rule_id": 23,
+      "packet_hex": "6000000000383a2020010db800000000000000000000000220010db800000000000000000000000104002e120000001860000000000811ff20010db800000000000000000000000120010db80000000000000000000000021633163300087803",
+      "compressed_hex": "17",
+      "bit_len": 8,
+      "direction": "down",
+      "receiver_position": "device",
+      "coverage": [
+        "ICMPv6 Parameter Problem",
+        "Pointer",
+        "embedded IPv6 fields at FP2",
+        "embedded UDP fields at FP2",
+        "downlink"
+      ]
+    },
+    {
+      "name": "udp-external-iid-reconstruction",
+      "rule_id": 24,
+      "packet_hex": "600000000010114020010db800000000000000000000000120010db8000000000000000000000002163616330010ca3765787465726e616c",
+      "compressed_hex": "18865787465726e616c0",
+      "bit_len": 76,
+      "direction": "up",
+      "receiver_position": "core",
+      "provider": {
+        "device_iid_hex": "0000000000000001",
+        "application_iid_hex": "0000000000000002"
+      },
+      "coverage": [
+        "cda-deviid",
+        "cda-appiid",
+        "external 64-bit IID reconstruction"
+      ]
+    },
+    {
+      "name": "no-compression-fallback",
+      "rule_id": 25,
+      "packet_hex": "6000000000043b4020010db800000000000000000000000120010db800000000000000000000000272617721",
+      "compressed_hex": "196000000000043b4020010db800000000000000000000000120010db800000000000000000000000272617721",
+      "bit_len": 360,
+      "direction": "up",
+      "receiver_position": "core",
+      "coverage": [
+        "fixed-width no-compression Rule ID",
+        "valid IPv6 packet passthrough"
+      ]
+    }
+  ]
+}

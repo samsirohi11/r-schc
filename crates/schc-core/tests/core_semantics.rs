@@ -1,4 +1,3 @@
-use schc_core::sid::SidItem;
 use schc_core::{
     bit::BitWriter, Compressor, Decompressor, Direction, ExternalValueProvider, FieldRef, Position,
     Result, RuleContext, SchcError, SidRegistry,
@@ -8,7 +7,7 @@ use std::sync::{Arc, Mutex};
 fn registry() -> SidRegistry {
     SidRegistry::load_path(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/sid/minimal.sid.json"
+        "/../../fixtures/core/ietf-schc@2026-05-07.sid"
     ))
     .unwrap()
 }
@@ -30,37 +29,11 @@ fn context(rule_id: u64, fields: &[String]) -> RuleContext {
 }
 
 fn external_registry() -> SidRegistry {
-    let mut sid_registry = registry();
-    for (sid, identifier) in [(3010, "cda-deviid"), (3011, "cda-appiid")] {
-        sid_registry.insert(SidItem {
-            sid,
-            identifier: identifier.to_owned(),
-            namespace: Some("identity".to_owned()),
-            module_name: Some("ietf-schc".to_owned()),
-            item_type: None,
-            status: None,
-        });
-    }
-    sid_registry
+    registry()
 }
 
 fn icmp_context(rule_id: u64, fields: &[String]) -> RuleContext {
-    let json = format!(
-        r#"{{"rules":[{{"rule_id":{rule_id},"rule_id_length":4,"fields":[{}]}}]}}"#,
-        fields.join(",")
-    );
-    let mut sid_registry = registry();
-    for (sid, identifier) in [(1306, "fid-icmpv6-mtu"), (1307, "fid-icmpv6-pointer")] {
-        sid_registry.insert(SidItem {
-            sid,
-            identifier: identifier.to_owned(),
-            namespace: Some("identity".to_owned()),
-            module_name: Some("ietf-schc".to_owned()),
-            item_type: None,
-            status: None,
-        });
-    }
-    RuleContext::from_json_str(&json, sid_registry).unwrap()
+    context_with_registry(rule_id, fields, registry())
 }
 
 fn fixed(
@@ -759,7 +732,7 @@ fn mixed_direction_entries_skip_inactive_entry_and_continue() {
         "value-sent",
     ));
     fields.push(variable(
-        "fid-udp-payload",
+        "fid-payload",
         1,
         "up",
         "bytes",
@@ -829,7 +802,7 @@ fn malformed_coap_sibling_does_not_hide_valid_udp_candidate() {
 
     let mut valid_udp = ipv6_udp_fields();
     valid_udp.push(variable(
-        "fid-udp-payload",
+        "fid-payload",
         1,
         "up",
         "bytes",
@@ -914,7 +887,7 @@ fn coap_occurrence_round_trip(rule_id: u64, second_position: usize) {
         "not-sent",
     ));
     fields.push(variable(
-        "fid-coap-payload",
+        "fid-payload",
         1,
         "bi",
         "bytes",

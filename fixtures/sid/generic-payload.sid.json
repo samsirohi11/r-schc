@@ -1,9 +1,0 @@
-{
-  "ietf-sid-file:sid-file": {
-    "module-name": "generic-payload-test",
-    "item": [
-      { "namespace": "identity", "identifier": "fid-unused", "sid": 1700 },
-      { "namespace": "identity", "identifier": "fid-payload", "sid": 1701 }
-    ]
-  }
-}
