@@ -6,13 +6,41 @@ use crate::error::{Result, SchcError};
 pub struct BitReader<'a> {
     bytes: &'a [u8],
     position: usize,
+    bit_len: usize,
 }
 
 impl<'a> BitReader<'a> {
     /// Creates a reader at bit position zero.
     #[must_use]
     pub fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, position: 0 }
+        Self {
+            bytes,
+            position: 0,
+            bit_len: bytes.len() * 8,
+        }
+    }
+
+    /// Creates a reader limited to the meaningful prefix of a byte slice.
+    ///
+    /// The unused bits in the final byte are not readable. This is used by
+    /// SCHC datagrams, whose wire representation may contain zero padding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `bit_len` exceeds the backing byte slice.
+    pub fn with_bit_len(bytes: &'a [u8], bit_len: usize) -> Result<Self> {
+        if bit_len > bytes.len() * 8 {
+            return Err(SchcError::BitOutOfBounds {
+                position: 0,
+                requested: bit_len,
+                available: bytes.len() * 8,
+            });
+        }
+        Ok(Self {
+            bytes,
+            position: 0,
+            bit_len,
+        })
     }
 
     /// Returns the current bit position.
@@ -23,14 +51,14 @@ impl<'a> BitReader<'a> {
 
     /// Returns the total number of readable bits.
     #[must_use]
-    pub fn bit_len(&self) -> usize {
-        self.bytes.len() * 8
+    pub const fn bit_len(&self) -> usize {
+        self.bit_len
     }
 
     /// Returns the number of bits remaining from the current position.
     #[must_use]
     pub fn remaining(&self) -> usize {
-        self.bit_len() - self.position
+        self.bit_len - self.position
     }
 
     /// Sets the current bit position.

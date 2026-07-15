@@ -874,12 +874,11 @@ fn decompressor_accepts_zero_sub_byte_padding() {
 }
 
 #[test]
-fn compression_without_payload_field_rejects_packet_with_payload() {
+fn compression_without_payload_field_round_trips_unread_udp_payload() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let json = std::fs::read_to_string(udp_payload_rule_fixture()).unwrap();
-    // Remove the explicit UDP payload field so the rule no longer accounts for
-    // UDP payload bytes. The compressor must not silently accept a packet whose
-    // payload bytes no field consumed.
+    // Remove the explicit UDP payload field so the unread UDP payload is
+    // carried through after the rule ID and residue.
     let json = json.replace(
         r#""cda": "compute" },
         { "field": "fid-udp-payload", "length": { "type": "variable", "unit": "bytes" }, "direction": "bi", "target": null, "mo": "ignore", "cda": "value-sent" }"#,
@@ -888,12 +887,19 @@ fn compression_without_payload_field_rejects_packet_with_payload() {
     let context = RuleContext::from_json_str(&json, registry).unwrap();
     let packet = udp_payload_packet();
 
-    let error = Compressor::new(context)
+    let compressed = Compressor::new(context.clone())
         .unwrap()
         .compress(Direction::Up, &packet)
-        .unwrap_err();
+        .unwrap();
+    let expected = [0x84, 0x06, 0x86, 0x56, 0xc6, 0xc6, 0xf0];
+    assert_eq!(compressed.bit_len(), 52);
+    assert_eq!(compressed.bytes(), expected);
 
-    assert!(matches!(error, SchcError::NoMatchingRule));
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress_with_bit_len(Position::Core, compressed.bytes(), compressed.bit_len())
+        .unwrap();
+    assert_eq!(restored, packet);
 }
 
 /// A rule set with two rules that share bidirectional IPv6 and CoAP header
@@ -1175,10 +1181,9 @@ fn nonzero_padding_error_identifies_padding() {
     );
 }
 
-/// Asserts that a trailing-residue error message identifies the residue
-/// and names the bit count.
+/// Asserts that full-byte trailing residue requires an exact meaningful bit length.
 #[test]
-fn trailing_residue_error_identifies_residue_and_count() {
+fn trailing_residue_error_requires_exact_bit_length() {
     let context = context();
     let decompressor = Decompressor::new(context).unwrap();
 
@@ -1199,8 +1204,8 @@ fn trailing_residue_error_identifies_residue_and_count() {
         "error must identify the residue operation, got: {message}"
     );
     assert!(
-        message.contains("14"),
-        "error must name the trailing bit count, got: {message}"
+        message.contains("decompress_with_bit_len"),
+        "error must name the exact-bit API, got: {message}"
     );
 }
 

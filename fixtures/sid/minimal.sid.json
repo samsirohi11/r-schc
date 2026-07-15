@@ -31,6 +31,8 @@
       { "namespace": "identity", "identifier": "fid-icmpv6-type", "sid": 1300 },
       { "namespace": "identity", "identifier": "fid-icmpv6-code", "sid": 1301 },
       { "namespace": "identity", "identifier": "fid-icmpv6-checksum", "sid": 1302 },
+      { "namespace": "identity", "identifier": "fid-icmpv6-identifier", "sid": 1304 },
+      { "namespace": "identity", "identifier": "fid-icmpv6-sequence", "sid": 1305 },
       { "namespace": "identity", "identifier": "fid-icmpv6-payload", "sid": 1303 },
       { "namespace": "identity", "identifier": "fid-unused", "sid": 1310 },
       { "namespace": "identity", "identifier": "fid-payload", "sid": 1311 },

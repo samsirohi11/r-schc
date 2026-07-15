@@ -253,6 +253,24 @@ fn generic_icmp_context() -> RuleContext {
             "ignore",
             "compute",
         ),
+        fixed(
+            "fid-icmpv6-identifier",
+            16,
+            1,
+            "bi",
+            "\"1234\"",
+            "equal",
+            "not-sent",
+        ),
+        fixed(
+            "fid-icmpv6-sequence",
+            16,
+            1,
+            "bi",
+            "\"0001\"",
+            "equal",
+            "not-sent",
+        ),
     ]);
     fields.push(field(
         "fid-payload",

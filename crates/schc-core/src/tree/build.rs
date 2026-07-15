@@ -221,6 +221,8 @@ fn push_cda(output: &mut Vec<u8>, action: Cda) {
         Cda::MappingSent => 2,
         Cda::Lsb => 3,
         Cda::Compute => 4,
+        Cda::DeviceIid => 5,
+        Cda::AppIid => 6,
     });
 }
 

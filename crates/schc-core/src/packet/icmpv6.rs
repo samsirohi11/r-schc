@@ -19,9 +19,21 @@ impl Icmpv6Message {
             return Err(packet_error("ICMPv6", "message shorter than 4-byte header"));
         }
 
+        let payload_offset = if matches!(input[0], 128 | 129) || matches!(input[0], 1..=4) {
+            8
+        } else {
+            4
+        };
+        if input.len() < payload_offset {
+            return Err(packet_error(
+                "ICMPv6",
+                "message shorter than type-specific header",
+            ));
+        }
+
         Ok(Self {
             bytes: input.to_vec(),
-            payload_offset: 4,
+            payload_offset,
         })
     }
 
@@ -41,6 +53,18 @@ impl Icmpv6Message {
     #[must_use]
     pub fn checksum(&self) -> u16 {
         u16::from_be_bytes([self.bytes[2], self.bytes[3]])
+    }
+
+    /// Returns whether this is an `ICMPv6` Echo Request or Echo Reply.
+    #[must_use]
+    pub fn is_echo(&self) -> bool {
+        matches!(self.bytes[0], 128 | 129)
+    }
+
+    /// Returns the byte offset of the message payload.
+    #[must_use]
+    pub const fn payload_offset(&self) -> usize {
+        self.payload_offset
     }
 
     /// Returns the `ICMPv6` payload bytes.

@@ -5,6 +5,6 @@ mod model;
 
 pub use load::RuleContext;
 pub use model::{
-    Cda, Direction, DirectionSelector, FieldLength, FieldRef, FieldRule, LengthUnit,
-    MatchingOperator, Position, Rule, RuleId, RuleNature, RuleSet, TargetValue,
+    Cda, Direction, DirectionSelector, ExternalValueProvider, FieldLength, FieldRef, FieldRule,
+    LengthUnit, MatchingOperator, Position, Rule, RuleId, RuleNature, RuleSet, TargetValue,
 };

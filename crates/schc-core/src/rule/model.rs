@@ -1,6 +1,22 @@
 //! Typed SCHC rule model.
 
+use crate::error::Result;
 use crate::SidRegistry;
+use std::fmt::Debug;
+
+/// Supplies values for runtime-dependent SCHC CDAs.
+///
+/// The core never derives device or application identifiers from networking
+/// state. A runtime may provide those values through this interface when a
+/// rule uses `cda-deviid` or `cda-appiid`.
+pub trait ExternalValueProvider: Debug + Send + Sync {
+    /// Returns the value for an external CDA at the requested width.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the runtime cannot supply the requested value.
+    fn value(&self, field: &FieldRef, direction: Direction, bit_len: usize) -> Result<Vec<u8>>;
+}
 
 /// Packet flow direction for a SCHC rule field.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -163,6 +179,10 @@ pub enum Cda {
     Lsb,
     /// The value is computed by the receiver.
     Compute,
+    /// The device IID is supplied by the runtime.
+    DeviceIid,
+    /// The application IID is supplied by the runtime.
+    AppIid,
 }
 
 /// Nature of a SCHC rule.

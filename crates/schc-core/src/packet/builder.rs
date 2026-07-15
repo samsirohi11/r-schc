@@ -2,8 +2,8 @@
 
 use crate::error::{Result, SchcError};
 use crate::packet::checksum::transport_checksum;
-use crate::packet::field::{FieldStore, FieldValue, PacketScope};
-use crate::packet::{CoapMessage, CoapOption};
+use crate::packet::field::{FieldKey, FieldStore, FieldValue, PacketScope};
+use crate::packet::{CoapMessage, CoapOption, Icmpv6Message, Ipv6Packet};
 use crate::rule::{Direction, FieldRef};
 
 /// Reconstructs a full IPv6 packet from decoded fields.
@@ -17,6 +17,137 @@ use crate::rule::{Direction, FieldRef};
 /// out of range, or the next-header value is unsupported.
 pub(crate) fn reconstruct_packet(direction: Direction, fields: &FieldStore) -> Result<Vec<u8>> {
     reconstruct_packet_at(direction, fields, PacketScope::Outer)
+}
+
+/// Reconstructs a packet and appends the unread wire suffix carried by a
+/// header-only compression rule.
+pub(crate) fn reconstruct_packet_with_suffix(
+    direction: Direction,
+    fields: &FieldStore,
+    suffix: &[u8],
+) -> Result<Vec<u8>> {
+    let inject_icmp_payload = header_only_icmp_error(fields)?;
+    if inject_icmp_payload {
+        validate_embedded_ipv6_suffix(suffix)?;
+    }
+    let mut packet = if inject_icmp_payload {
+        let mut fields_with_payload = fields.clone();
+        fields_with_payload.insert(
+            FieldKey::with_scope(FieldRef::Payload, 1, 0, PacketScope::Outer),
+            FieldValue::from_bytes(suffix.to_vec(), suffix.len() * 8)?,
+        );
+        reconstruct_packet(direction, &fields_with_payload)?
+    } else {
+        reconstruct_packet(direction, fields)?
+    };
+    if !inject_icmp_payload {
+        packet.extend_from_slice(suffix);
+    }
+    if packet.len() < 40 {
+        return Err(SchcError::InvalidResidue(
+            "carried packet suffix follows an incomplete IPv6 header".to_owned(),
+        ));
+    }
+
+    let next_header = packet[6];
+    if fields
+        .first_by_field_scope(
+            &FieldRef::Ipv6("fid-ipv6-payload-length"),
+            PacketScope::Outer,
+        )
+        .is_none()
+    {
+        let payload_len = u16::try_from(packet.len() - 40).map_err(|_| {
+            SchcError::InvalidResidue("carried IPv6 payload is too large".to_owned())
+        })?;
+        packet[4..6].copy_from_slice(&payload_len.to_be_bytes());
+    }
+
+    let source: [u8; 16] = packet[8..24].try_into().expect("IPv6 source is 16 bytes");
+    let destination: [u8; 16] = packet[24..40]
+        .try_into()
+        .expect("IPv6 destination is 16 bytes");
+    match next_header {
+        17 => {
+            if packet.len() < 48 {
+                return Err(SchcError::InvalidResidue(
+                    "carried UDP packet is shorter than its header".to_owned(),
+                ));
+            }
+            if fields
+                .first_by_field_scope(&FieldRef::Udp("fid-udp-length"), PacketScope::Outer)
+                .is_none()
+            {
+                let length = u16::try_from(packet.len() - 40).map_err(|_| {
+                    SchcError::InvalidResidue("carried UDP payload is too large".to_owned())
+                })?;
+                packet[44..46].copy_from_slice(&length.to_be_bytes());
+            }
+            if fields
+                .first_by_field_scope(&FieldRef::Udp("fid-udp-checksum"), PacketScope::Outer)
+                .is_none()
+            {
+                packet[46..48].copy_from_slice(&[0, 0]);
+                let checksum = transport_checksum(&source, &destination, 17, &packet[40..]);
+                packet[46..48].copy_from_slice(&checksum.to_be_bytes());
+            }
+            if fields
+                .first_by_field_scope(&FieldRef::Coap("fid-coap-version"), PacketScope::Outer)
+                .is_some()
+            {
+                CoapMessage::parse(&packet[48..])?;
+            }
+        }
+        58 => {
+            if packet.len() < 44 {
+                return Err(SchcError::InvalidResidue(
+                    "carried ICMPv6 packet is shorter than its header".to_owned(),
+                ));
+            }
+            if fields
+                .first_by_field_scope(&FieldRef::Icmpv6("fid-icmpv6-checksum"), PacketScope::Outer)
+                .is_none()
+            {
+                packet[42..44].copy_from_slice(&[0, 0]);
+                let checksum = transport_checksum(&source, &destination, 58, &packet[40..]);
+                packet[42..44].copy_from_slice(&checksum.to_be_bytes());
+            }
+            Icmpv6Message::parse(&packet[40..])?;
+        }
+        _ => {}
+    }
+    Ok(packet)
+}
+
+fn validate_embedded_ipv6_suffix(suffix: &[u8]) -> Result<()> {
+    let embedded = Ipv6Packet::parse(suffix)?;
+    if embedded.to_vec().len() != suffix.len() {
+        return Err(SchcError::Packet {
+            protocol: "IPv6",
+            reason: "payload length does not cover complete packet".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn header_only_icmp_error(fields: &FieldStore) -> Result<bool> {
+    let next_header = fields
+        .first_by_field_scope(&FieldRef::Ipv6("fid-ipv6-nextheader"), PacketScope::Outer)
+        .map(FieldValue::to_u64)
+        .transpose()?;
+    let message_type = fields
+        .first_by_field_scope(&FieldRef::Icmpv6("fid-icmpv6-type"), PacketScope::Outer)
+        .map(FieldValue::to_u64)
+        .transpose()?;
+    let has_payload = fields.iter().any(|(key, _)| {
+        matches!(
+            key.field(),
+            FieldRef::Payload | FieldRef::Icmpv6("fid-icmpv6-payload")
+        )
+    });
+    Ok(next_header == Some(58)
+        && message_type.is_some_and(|value| matches!(value, 1..=4))
+        && !has_payload)
 }
 
 /// Reverses a packet direction.
@@ -206,26 +337,36 @@ fn reconstruct_icmpv6(
         };
 
     if crate::packet::traversal::is_icmpv6_error_type(message_type) {
-        if !crate::packet::traversal::has_icmpv6_unused_field(message_type) {
-            return Err(SchcError::InvalidResidue(format!(
-                "ICMPv6 error type {message_type} requires an unsupported type-specific word"
-            )));
-        }
-        let unused = fields
-            .first_by_field_scope(&FieldRef::Unused, scope)
-            .ok_or_else(|| {
-                SchcError::InvalidResidue(
-                    "missing fid-unused for ICMPv6 error reconstruction".to_owned(),
-                )
-            })?;
-        if unused.bit_len() != 32 || unused.bytes().len() != 4 {
+        let type_word = if crate::packet::traversal::has_icmpv6_unused_field(message_type) {
+            fields
+                .first_by_field_scope(&FieldRef::Unused, scope)
+                .ok_or_else(|| {
+                    SchcError::InvalidResidue(
+                        "missing fid-unused for ICMPv6 error reconstruction".to_owned(),
+                    )
+                })?
+        } else if let Some(field) = fields.first_by_field_scope(
+            &FieldRef::Icmpv6(if message_type == 2 {
+                "fid-icmpv6-mtu"
+            } else {
+                "fid-icmpv6-pointer"
+            }),
+            scope,
+        ) {
+            field
+        } else {
             return Err(SchcError::InvalidResidue(
-                "ICMPv6 error fid-unused must be exactly 32 bits".to_owned(),
+                "missing ICMPv6 type-specific 32-bit field".to_owned(),
+            ));
+        };
+        if type_word.bit_len() != 32 || type_word.bytes().len() != 4 {
+            return Err(SchcError::InvalidResidue(
+                "ICMPv6 type-specific field must be exactly 32 bits".to_owned(),
             ));
         }
         let mut bytes = vec![message_type, code];
         bytes.extend_from_slice(&checksum.to_be_bytes());
-        bytes.extend_from_slice(unused.bytes());
+        bytes.extend_from_slice(type_word.bytes());
 
         if fields
             .first_by_field_scope(&FieldRef::Ipv6("fid-ipv6-version"), PacketScope::Embedded)
@@ -256,6 +397,17 @@ fn reconstruct_icmpv6(
         let payload = shared_payload(fields, scope, &FieldRef::Icmpv6("fid-icmpv6-payload"))?;
         let mut bytes = vec![message_type, code];
         bytes.extend_from_slice(&checksum.to_be_bytes());
+        if matches!(message_type, 128 | 129)
+            && fields
+                .first_by_field_scope(&FieldRef::Icmpv6("fid-icmpv6-identifier"), scope)
+                .is_some()
+        {
+            let identifier =
+                first_u16_at(fields, &FieldRef::Icmpv6("fid-icmpv6-identifier"), scope)?;
+            let sequence = first_u16_at(fields, &FieldRef::Icmpv6("fid-icmpv6-sequence"), scope)?;
+            bytes.extend_from_slice(&identifier.to_be_bytes());
+            bytes.extend_from_slice(&sequence.to_be_bytes());
+        }
         bytes.extend_from_slice(&payload);
         Ok((bytes, compute_checksum))
     }

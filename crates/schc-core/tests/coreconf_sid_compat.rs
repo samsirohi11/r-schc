@@ -2,9 +2,8 @@
 //!
 //! These tests verify that the SID registry can deterministically load the
 //! standard CORECONF SID file shape defined for SCHC CORECONF, and
-//! that compression-core identities present in that file but not supported by
-//! the Rust compression core produce explicit, identifiable errors when used in
-//! a rule.
+//! that compression-core identities present in that file load into their typed
+//! core representations when used in a rule.
 //!
 //! The fixture mirrors the field layout, namespaces, and `type` value variants
 //! of the IETF SCHC SID file (string, array, and object values of the optional
@@ -60,17 +59,15 @@ fn loads_ietf_schc_sid_file_shape() {
     assert_eq!(registry.sid("nature-fragmentation").unwrap(), 2941);
     assert_eq!(registry.identifier(2941).unwrap(), "nature-fragmentation");
 
-    // Unsupported identities are still present as registry entries so callers
-    // can report them precisely when they appear in rules.
+    // Additional identities are present as registry entries for rule loading.
     assert_eq!(registry.sid("cda-appiid").unwrap(), 2926);
     assert_eq!(registry.sid("fid-icmpv6-identifier").unwrap(), 2813);
 }
 
-/// A JSON rule that uses a field identity present in the IETF SCHC SID file but
-/// not mapped by the Rust compression core must fail with an explicit error
-/// naming the unsupported field identity and its SID.
+/// A JSON rule that uses the IETF SCHC `ICMPv6` identifier field loads into the
+/// corresponding typed compression-core field.
 #[test]
-fn json_rule_rejects_unsupported_ietf_schc_sid_field_identity() {
+fn json_rule_loads_ietf_schc_sid_icmpv6_identifier() {
     let registry = SidRegistry::load_path(ietf_schc_sid_fixture()).unwrap();
     let json = r#"
     {
@@ -84,26 +81,19 @@ fn json_rule_rejects_unsupported_ietf_schc_sid_field_identity() {
     }
     "#;
 
-    let error = RuleContext::from_json_str(json, registry).unwrap_err();
-    let reason = error_reason(&error);
-    assert!(
-        reason.contains("fid-icmpv6-identifier"),
-        "error must name the unsupported field identifier, got: {reason}"
-    );
-    assert!(
-        reason.contains("2813"),
-        "error must name the unsupported field SID, got: {reason}"
-    );
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+    let field = &context.rules().rules()[0].fields()[0];
+    assert_eq!(field.field, FieldRef::Icmpv6("fid-icmpv6-identifier"));
+    assert_eq!(field.length, FieldLength::FixedBits(16));
+    assert_eq!(field.action, Cda::ValueSent);
 }
 
-/// A CORECONF CBOR rule that uses a field-id SID present in the IETF SCHC SID
-/// file but not mapped by the Rust compression core must fail with an explicit
-/// error naming the unsupported field identity and its SID.
+/// A CORECONF CBOR rule that uses the IETF SCHC `ICMPv6` identifier field loads
+/// into the corresponding typed compression-core field.
 #[test]
-fn cbor_rule_rejects_unsupported_ietf_schc_sid_field_identity() {
+fn cbor_rule_loads_ietf_schc_sid_icmpv6_identifier() {
     let registry = SidRegistry::load_path(ietf_schc_sid_fixture()).unwrap();
-    // Field SID 2813 resolves to `fid-icmpv6-identifier`, which is registered
-    // by the IETF SCHC SID file but is not supported by the compression core.
+    // Field SID 2813 resolves to `fid-icmpv6-identifier`.
     let root = map(vec![(
         int(2574),
         map(vec![(
@@ -130,27 +120,20 @@ fn cbor_rule_rejects_unsupported_ietf_schc_sid_field_identity() {
     let mut cbor = Vec::new();
     ciborium::ser::into_writer(&root, &mut cbor).unwrap();
 
-    let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
-    let reason = error_reason(&error);
-    assert!(
-        reason.contains("fid-icmpv6-identifier"),
-        "error must name the unsupported field identifier, got: {reason}"
-    );
-    assert!(
-        reason.contains("2813"),
-        "error must name the unsupported field SID, got: {reason}"
-    );
+    let context = RuleContext::from_cbor_slice(&cbor, registry).unwrap();
+    let field = &context.rules().rules()[0].fields()[0];
+    assert_eq!(field.field, FieldRef::Icmpv6("fid-icmpv6-identifier"));
+    assert_eq!(field.length, FieldLength::FixedBits(16));
+    assert_eq!(field.action, Cda::ValueSent);
 }
 
-/// A CORECONF CBOR rule that uses an unsupported CDA identity from the IETF
-/// SCHC SID file must fail with an explicit error naming the unsupported CDA.
-/// This asserts that capability reporting for unsupported CDAs remains explicit
-/// when the IETF SCHC SID file is used as the registry source.
+/// A CORECONF CBOR rule that applies `cda-appiid` to the wrong field must fail
+/// with a precise invalid-field diagnostic.
 #[test]
-fn cbor_rule_rejects_unsupported_ietf_schc_sid_cda() {
+fn cbor_rule_rejects_ietf_schc_sid_cda_on_wrong_field() {
     let registry = SidRegistry::load_path(ietf_schc_sid_fixture()).unwrap();
-    // CDA SID 2926 resolves to `cda-appiid`, which is registered by the IETF
-    // SCHC SID file but is not supported by the compression core.
+    // CDA SID 2926 resolves to `cda-appiid`, which is valid only for
+    // `fid-ipv6-appiid`, not the IPv6 Version field used by this probe.
     let root = map(vec![(
         int(2574),
         map(vec![(
@@ -180,12 +163,12 @@ fn cbor_rule_rejects_unsupported_ietf_schc_sid_cda() {
     let error = RuleContext::from_cbor_slice(&cbor, registry).unwrap_err();
     let reason = error_reason(&error);
     assert!(
-        reason.contains("cda-appiid"),
-        "error must name the unsupported CDA identifier, got: {reason}"
+        matches!(&error, SchcError::InvalidRuleField { .. }),
+        "wrong CDA/field pairing must be an invalid-field error, got: {error}"
     );
-    assert!(
-        reason.contains("2926"),
-        "error must name the unsupported CDA SID, got: {reason}"
+    assert_eq!(
+        reason, "cda-appiid is only valid for fid-ipv6-appiid",
+        "error must identify the invalid CDA/field pairing"
     );
 }
 

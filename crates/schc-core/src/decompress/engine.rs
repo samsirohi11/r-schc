@@ -7,14 +7,16 @@ use crate::packet::{
     length::{read_variable_length_prefix, LengthResolver},
 };
 use crate::rule::{
-    Cda, Direction, FieldLength, FieldRef, FieldRule, MatchingOperator, Position, Rule,
-    RuleContext, TargetValue,
+    Cda, Direction, ExternalValueProvider, FieldLength, FieldRef, FieldRule, MatchingOperator,
+    Position, Rule, RuleContext, TargetValue,
 };
+use std::sync::Arc;
 
 /// SCHC decompressor.
 #[derive(Debug, Clone)]
 pub struct Decompressor {
     context: RuleContext,
+    provider: Option<Arc<dyn ExternalValueProvider>>,
 }
 
 impl Decompressor {
@@ -25,7 +27,26 @@ impl Decompressor {
     /// Returns an error if the supplied context cannot be used to initialize
     /// decompression state.
     pub fn new(context: RuleContext) -> Result<Self> {
-        Ok(Self { context })
+        Ok(Self {
+            context,
+            provider: None,
+        })
+    }
+
+    /// Builds a decompressor with a runtime provider for external IID CDAs.
+    ///
+    /// # Errors
+    ///
+    /// This currently cannot fail for a valid rule context, but returns the
+    /// crate result type for symmetry with [`Self::new`].
+    pub fn with_external_value_provider(
+        context: RuleContext,
+        provider: Arc<dyn ExternalValueProvider>,
+    ) -> Result<Self> {
+        Ok(Self {
+            context,
+            provider: Some(provider),
+        })
     }
 
     /// Decompresses a SCHC datagram into an IPv6 packet.
@@ -45,13 +66,99 @@ impl Decompressor {
     /// Returns [`SchcError::InvalidResidue`] when residue bits are malformed or
     /// cannot be reconstructed into a supported packet.
     pub fn decompress(&self, position: Position, compressed: &[u8]) -> Result<Vec<u8>> {
-        let (rule, mut reader) = select_rule(self.context.rules().rules(), compressed)?;
+        let full_len = compressed.len() * 8;
+        let minimum = full_len.saturating_sub(7);
+        // Try the complete byte slice first. If it contains a structured
+        // unread suffix, do not reinterpret trailing zero bits as padding and
+        // accidentally accept the same full-byte suffix through a shorter
+        // candidate length.
+        let mut last_error =
+            match self.decompress_with_bit_len_policy(position, compressed, full_len, false) {
+                Ok(packet) => return Ok(packet),
+                Err(error) if is_exact_bit_length_required(&error) => return Err(error),
+                Err(error) => Some(error),
+            };
+
+        for bit_len in (minimum..full_len).rev() {
+            if !zero_padding_bits(compressed, bit_len) {
+                continue;
+            }
+            match self.decompress_with_bit_len_policy(position, compressed, bit_len, false) {
+                Ok(packet) => return Ok(packet),
+                Err(error) => last_error = Some(error),
+            }
+        }
+        Err(last_error.unwrap_or(SchcError::NoMatchingRule))
+    }
+
+    /// Decompresses a datagram while retaining its exact meaningful bit length.
+    ///
+    /// This entry point is required when a header-only rule carries an unread
+    /// byte suffix. The compatible [`Self::decompress`] API treats up to seven
+    /// trailing zero bits as padding and rejects full-byte trailing residue.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the meaningful bit length exceeds the input,
+    /// residue cannot be decoded, or packet reconstruction fails.
+    pub fn decompress_with_bit_len(
+        &self,
+        position: Position,
+        compressed: &[u8],
+        bit_len: usize,
+    ) -> Result<Vec<u8>> {
+        self.decompress_with_bit_len_policy(position, compressed, bit_len, true)
+    }
+
+    fn decompress_with_bit_len_policy(
+        &self,
+        position: Position,
+        compressed: &[u8],
+        bit_len: usize,
+        allow_unread_suffix: bool,
+    ) -> Result<Vec<u8>> {
+        let (rule, mut reader) = select_rule(self.context.rules().rules(), compressed, bit_len)?;
         match rule.nature() {
             crate::RuleNature::Compression => {
                 let direction = inverse_direction(position);
-                let fields = decode_fields(rule, direction, &mut reader)?;
-                validate_padding(&mut reader)?;
-                crate::packet::builder::reconstruct_packet(direction, &fields)
+                let fields = decode_fields(rule, direction, &mut reader, self.provider.as_deref())?;
+                let suffix = if reader.remaining() >= 8 {
+                    if fields.iter().any(|(key, _)| {
+                        matches!(
+                            key.field(),
+                            FieldRef::Payload
+                                | FieldRef::Udp("fid-udp-payload")
+                                | FieldRef::Coap("fid-coap-payload")
+                                | FieldRef::Icmpv6("fid-icmpv6-payload")
+                        )
+                    }) {
+                        return Err(SchcError::InvalidResidue(format!(
+                            "{} trailing residue bits remain",
+                            reader.remaining()
+                        )));
+                    }
+                    if !allow_unread_suffix {
+                        return Err(SchcError::InvalidResidue(
+                            EXACT_BIT_LENGTH_REQUIRED.to_owned(),
+                        ));
+                    }
+                    if reader.remaining() % 8 != 0 {
+                        return Err(SchcError::InvalidResidue(format!(
+                            "unread packet suffix is not byte aligned: {} trailing bits remain",
+                            compressed.len() * 8 - reader.position()
+                        )));
+                    }
+                    Some(reader.read_bytes_padded(reader.remaining())?)
+                } else {
+                    validate_padding(&mut reader)?;
+                    None
+                };
+                match suffix {
+                    Some(suffix) => crate::packet::builder::reconstruct_packet_with_suffix(
+                        direction, &fields, &suffix,
+                    ),
+                    None => crate::packet::builder::reconstruct_packet(direction, &fields),
+                }
             }
             crate::RuleNature::NoCompression => decode_no_compression_payload(&mut reader),
             crate::RuleNature::Fragmentation => Err(SchcError::UnsupportedRuleNature {
@@ -67,9 +174,27 @@ impl Decompressor {
     }
 }
 
-fn select_rule<'a>(rules: &'a [Rule], compressed: &'a [u8]) -> Result<(&'a Rule, BitReader<'a>)> {
+const EXACT_BIT_LENGTH_REQUIRED: &str =
+    "unread packet suffix requires decompress_with_bit_len for exact bit length";
+
+fn is_exact_bit_length_required(error: &SchcError) -> bool {
+    matches!(error, SchcError::InvalidResidue(reason) if reason == EXACT_BIT_LENGTH_REQUIRED)
+}
+
+fn zero_padding_bits(bytes: &[u8], bit_len: usize) -> bool {
+    (bit_len..bytes.len() * 8).all(|index| {
+        let shift = 7 - (index % 8);
+        (bytes[index / 8] >> shift) & 1 == 0
+    })
+}
+
+fn select_rule<'a>(
+    rules: &'a [Rule],
+    compressed: &'a [u8],
+    bit_len: usize,
+) -> Result<(&'a Rule, BitReader<'a>)> {
     for rule in rules {
-        let mut reader = BitReader::new(compressed);
+        let mut reader = BitReader::with_bit_len(compressed, bit_len)?;
         let rule_id = rule.id();
         if reader.remaining() < rule_id.bit_len() {
             continue;
@@ -80,6 +205,23 @@ fn select_rule<'a>(rules: &'a [Rule], compressed: &'a [u8]) -> Result<(&'a Rule,
     }
 
     Err(SchcError::NoMatchingRule)
+}
+
+fn reverse_direction(direction: Direction) -> Direction {
+    match direction {
+        Direction::Up => Direction::Down,
+        Direction::Down => Direction::Up,
+    }
+}
+
+fn field_position_applies(position: usize, scope: PacketScope, field: &FieldRef) -> bool {
+    if position == 0 || matches!(field, FieldRef::CoapOption { .. }) {
+        return true;
+    }
+    matches!(
+        (scope, position),
+        (PacketScope::Outer, 1) | (PacketScope::Embedded, 2)
+    )
 }
 
 fn inverse_direction(position: Position) -> Direction {
@@ -97,6 +239,7 @@ fn decode_fields(
     rule: &Rule,
     direction: Direction,
     reader: &mut BitReader<'_>,
+    provider: Option<&dyn ExternalValueProvider>,
 ) -> Result<FieldStore> {
     let mut fields = FieldStore::default();
     let mut lengths = LengthResolver::default();
@@ -137,8 +280,19 @@ fn decode_fields(
                 "embedded transport field appears before embedded IPv6 scope".to_owned(),
             ));
         }
+        if !field_position_applies(field.field_position, scope, &field.field) {
+            return Err(SchcError::InvalidResidue(format!(
+                "unsupported field position {} for {:?} in {:?} scope",
+                field.field_position, field.field, scope
+            )));
+        }
         let bit_len = decode_field_len(field, reader, &lengths, &fields)?;
-        let value = decode_field_value(field, bit_len, reader)?;
+        let field_direction = if scope == PacketScope::Embedded {
+            reverse_direction(direction)
+        } else {
+            direction
+        };
+        let value = decode_field_value(field, bit_len, reader, field_direction, provider)?;
         if matches!(field.field, FieldRef::Coap("fid-coap-tkl")) {
             lengths.set_token_length(usize::try_from(value.to_u64()?).map_err(|_| {
                 SchcError::InvalidResidue("CoAP TKL does not fit usize".to_owned())
@@ -190,6 +344,8 @@ fn decode_field_value(
     field: &FieldRule,
     bit_len: usize,
     reader: &mut BitReader<'_>,
+    direction: Direction,
+    provider: Option<&dyn ExternalValueProvider>,
 ) -> Result<FieldValue> {
     match field.action {
         Cda::NotSent => target_as_value(&field.target, bit_len).and_then(|value| {
@@ -203,6 +359,25 @@ fn decode_field_value(
         Cda::ValueSent => FieldValue::read_from(reader, bit_len),
         Cda::MappingSent => decode_mapping_sent(&field.target, bit_len, reader),
         Cda::Lsb => decode_lsb(field, bit_len, reader),
+        Cda::DeviceIid | Cda::AppIid => {
+            let provider = provider.ok_or_else(|| {
+                SchcError::InvalidResidue(
+                    "external IID CDA requires an ExternalValueProvider".to_owned(),
+                )
+            })?;
+            let bytes = provider.value(&field.field, direction, bit_len)?;
+            let expected_bytes = bit_len.div_ceil(8);
+            if bytes.len() != expected_bytes {
+                return Err(SchcError::InvalidResidue(format!(
+                    "external value for {:?} has {} bytes; expected {} bytes for {} bits",
+                    field.field,
+                    bytes.len(),
+                    expected_bytes,
+                    bit_len
+                )));
+            }
+            bytes_as_value(&bytes, bit_len)
+        }
         Cda::Compute => unreachable!("compute fields are skipped before decoding"),
     }
 }
@@ -361,7 +536,7 @@ mod tests {
         let second = Rule::new(RuleId::new(0b1010, 4), Vec::new());
         let rules = RuleSet::new(vec![first, second], SidRegistry::default());
 
-        let (rule, reader) = select_rule(rules.rules(), &[0b1010_0000]).unwrap();
+        let (rule, reader) = select_rule(rules.rules(), &[0b1010_0000], 8).unwrap();
 
         assert_eq!(rule.id().value(), 0b10);
         assert_eq!(reader.position(), 2);

@@ -6,7 +6,7 @@ use thiserror::Error;
 pub type Result<T> = core::result::Result<T, SchcError>;
 
 /// Structured error type for rule loading, packet parsing, and SCHC processing.
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum SchcError {
     /// A bit cursor attempted to read or seek outside the available data.
     #[error("bit cursor out of bounds: requested {requested} bits at position {position}, available {available}")]

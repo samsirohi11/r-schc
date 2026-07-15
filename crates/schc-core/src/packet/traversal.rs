@@ -53,7 +53,7 @@ pub(crate) fn embedded_ipv6_packet(packet: &[u8]) -> Result<Vec<u8>> {
             "error header is shorter than 8 bytes",
         ));
     }
-    let embedded = &icmp.payload()[4..];
+    let embedded = icmp.payload();
     Ok(Ipv6Packet::parse(embedded)?.to_vec())
 }
 

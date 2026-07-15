@@ -163,11 +163,29 @@ impl RuleContext {
             validate_rule_id(rule_index, rule_id, rule_id_length)?;
             let nature = cbor_rule_nature(&sid_registry, rule_index, rule_value)?;
 
-            let entry_values =
-                required_array(rule_value, 23).map_err(|reason| SchcError::InvalidRule {
-                    rule_index,
-                    reason: format!("invalid entry list key 23: {reason}"),
-                })?;
+            let entry_values = match map_value(rule_value, 23) {
+                Some(Value::Array(values)) => values.as_slice(),
+                Some(_) => {
+                    return Err(SchcError::InvalidRule {
+                        rule_index,
+                        reason: "invalid entry list key 23: value is not an array".to_owned(),
+                    });
+                }
+                None if matches!(
+                    nature,
+                    RuleNature::NoCompression | RuleNature::Fragmentation
+                ) =>
+                {
+                    &[]
+                }
+                None => {
+                    return Err(SchcError::InvalidRule {
+                        rule_index,
+                        reason: "missing required entry list key 23 for compression rule"
+                            .to_owned(),
+                    });
+                }
+            };
             let mut fields = Vec::with_capacity(entry_values.len());
             for (entry_order, entry_value) in entry_values.iter().enumerate() {
                 fields.push(load_cbor_field(
@@ -381,6 +399,20 @@ fn validate_field_rule(rule_index: usize, field: &FieldRule) -> Result<()> {
             ),
         ));
     }
+    if field.action == Cda::AppIid && !matches!(field.field, FieldRef::Ipv6("fid-ipv6-appiid")) {
+        return Err(invalid_field(
+            rule_index,
+            field.entry_index,
+            "cda-appiid is only valid for fid-ipv6-appiid".to_owned(),
+        ));
+    }
+    if field.action == Cda::DeviceIid && !matches!(field.field, FieldRef::Ipv6("fid-ipv6-deviid")) {
+        return Err(invalid_field(
+            rule_index,
+            field.entry_index,
+            "cda-deviid is only valid for fid-ipv6-deviid".to_owned(),
+        ));
+    }
     if matches!(field.field, FieldRef::SyntheticCoapMarker)
         && (field.action != Cda::NotSent || field.matching != MatchingOperator::Ignore)
     {
@@ -390,20 +422,7 @@ fn validate_field_rule(rule_index: usize, field: &FieldRule) -> Result<()> {
             "CoAP payload marker must use not-sent with ignore".to_owned(),
         ));
     }
-    if matches!(field.field, FieldRef::Payload)
-        && !matches!(
-            &field.length,
-            FieldLength::FixedBits(bits) if *bits % 8 == 0
-        )
-        && !matches!(&field.length, FieldLength::VariableBytes)
-        && !matches!(
-            &field.length,
-            FieldLength::FromPreviousField {
-                unit: LengthUnit::Bytes,
-                ..
-            }
-        )
-    {
+    if !payload_length_is_supported(field) {
         return Err(invalid_field(
             rule_index,
             field.entry_index,
@@ -411,6 +430,20 @@ fn validate_field_rule(rule_index: usize, field: &FieldRule) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn payload_length_is_supported(field: &FieldRule) -> bool {
+    !matches!(field.field, FieldRef::Payload)
+        || matches!(&field.length, FieldLength::FixedBits(bits) if *bits % 8 == 0)
+        || matches!(&field.length, FieldLength::VariableBytes)
+        || (field.action == Cda::Lsb && matches!(&field.length, FieldLength::VariableBits))
+        || matches!(
+            &field.length,
+            FieldLength::FromPreviousField {
+                unit: LengthUnit::Bytes,
+                ..
+            }
+        )
 }
 
 fn load_field(
@@ -892,6 +925,8 @@ fn cbor_cda(
         "cda-mapping-sent" => Ok(Cda::MappingSent),
         "cda-lsb" => Ok(Cda::Lsb),
         "cda-compute" => Ok(Cda::Compute),
+        "cda-deviid" => Ok(Cda::DeviceIid),
+        "cda-appiid" => Ok(Cda::AppIid),
         identifier => Err(invalid_field(
             rule_index,
             entry_index,
@@ -1248,6 +1283,14 @@ fn cda(
             validate_field_identifier(sid_registry, rule_index, entry_index, "cda", "cda-compute")?;
             Ok(Cda::Compute)
         }
+        "deviid" => {
+            validate_field_identifier(sid_registry, rule_index, entry_index, "cda", "cda-deviid")?;
+            Ok(Cda::DeviceIid)
+        }
+        "appiid" => {
+            validate_field_identifier(sid_registry, rule_index, entry_index, "cda", "cda-appiid")?;
+            Ok(Cda::AppIid)
+        }
         _ => Err(invalid_field(
             rule_index,
             entry_index,
@@ -1358,6 +1401,10 @@ fn field_ref(identifier: &str, sid: u64) -> FieldRef {
         "fid-icmpv6-type" => FieldRef::Icmpv6("fid-icmpv6-type"),
         "fid-icmpv6-code" => FieldRef::Icmpv6("fid-icmpv6-code"),
         "fid-icmpv6-checksum" => FieldRef::Icmpv6("fid-icmpv6-checksum"),
+        "fid-icmpv6-identifier" => FieldRef::Icmpv6("fid-icmpv6-identifier"),
+        "fid-icmpv6-sequence" => FieldRef::Icmpv6("fid-icmpv6-sequence"),
+        "fid-icmpv6-mtu" => FieldRef::Icmpv6("fid-icmpv6-mtu"),
+        "fid-icmpv6-pointer" => FieldRef::Icmpv6("fid-icmpv6-pointer"),
         "fid-icmpv6-payload" => FieldRef::Icmpv6("fid-icmpv6-payload"),
         "fid-unused" => FieldRef::Unused,
         "fid-payload" => FieldRef::Payload,

@@ -72,13 +72,15 @@ fn coap_rejects_reserved_option_nibbles_and_empty_payload_marker() {
 fn icmpv6_rejects_truncated_messages_and_preserves_bytes() {
     assert!(Icmpv6Message::parse(&[128, 0, 0]).is_err());
 
-    let message = [128, 0, 0x12, 0x34, 0xab, 0xcd];
+    assert!(Icmpv6Message::parse(&[128, 0, 0x12, 0x34, 0xab, 0xcd]).is_err());
+
+    let message = [128, 0, 0x12, 0x34, 0xab, 0xcd, 0, 1, b'o', b'k'];
     let icmp = Icmpv6Message::parse(&message).unwrap();
 
     assert_eq!(icmp.message_type(), 128);
     assert_eq!(icmp.code(), 0);
     assert_eq!(icmp.checksum(), 0x1234);
-    assert_eq!(icmp.payload(), &[0xab, 0xcd]);
+    assert_eq!(icmp.payload(), b"ok");
     assert_eq!(icmp.to_vec(), message);
 }
 
@@ -89,7 +91,7 @@ fn icmpv6_message_builds_echo_payload() {
     assert_eq!(icmp.message_type(), 128);
     assert_eq!(icmp.code(), 0);
     assert_eq!(icmp.checksum(), 0x333e);
-    assert_eq!(icmp.payload(), b"\x12\x34\x00\x01ping");
+    assert_eq!(icmp.payload(), b"ping");
     assert_eq!(
         icmp.to_vec(),
         hex::decode("8000333e1234000170696e67").unwrap()
