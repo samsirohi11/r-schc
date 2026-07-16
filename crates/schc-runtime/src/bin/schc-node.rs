@@ -1,7 +1,13 @@
 #![forbid(unsafe_code)]
 
-use clap::{Parser, ValueEnum};
+use clap::{ArgGroup, Parser, ValueEnum};
 use schc_core::{RuleContext, SidRegistry};
+#[cfg(target_os = "linux")]
+use schc_runtime::linux_tun::{LinuxTunConfig, LinuxTunDevice};
+#[cfg(target_os = "linux")]
+use schc_runtime::packet::{
+    PacketDeviceError, PacketReport, PacketTransport, PacketTransportConfig, PacketTransportError,
+};
 use schc_runtime::udp::{UdpError, UdpReport, UdpTransport, UdpTransportConfig};
 use schc_runtime::{DeviceId, DeviceProfile, Node, NodeRole, Runtime};
 use std::error::Error;
@@ -37,7 +43,13 @@ impl Role {
 #[derive(Debug, Parser)]
 #[command(
     name = "schc-node",
-    about = "Run one standalone SCHC node over a raw UDP link"
+    about = "Run one standalone SCHC node over a raw UDP link",
+    group(
+        ArgGroup::new("packet-boundary")
+            .required(true)
+            .multiple(false)
+            .args(["tun_name", "packet_ingress_bind"])
+    )
 )]
 struct Cli {
     /// Local node role.
@@ -59,11 +71,38 @@ struct Cli {
     #[arg(long, value_name = "ADDR")]
     link_peer: SocketAddr,
     /// Local UDP address for complete IPv6 packet ingress.
-    #[arg(long, value_name = "ADDR")]
-    packet_ingress_bind: SocketAddr,
+    #[arg(
+        long,
+        value_name = "ADDR",
+        requires = "packet_output_peer",
+        conflicts_with = "tun_name",
+        group = "packet-boundary"
+    )]
+    packet_ingress_bind: Option<SocketAddr>,
     /// UDP destination for reconstructed complete IPv6 packets.
-    #[arg(long, value_name = "ADDR")]
-    packet_output_peer: SocketAddr,
+    #[arg(
+        long,
+        value_name = "ADDR",
+        requires = "packet_ingress_bind",
+        conflicts_with = "tun_name"
+    )]
+    packet_output_peer: Option<SocketAddr>,
+    /// Explicit Linux TUN interface name, selecting packet-device mode.
+    #[arg(
+        long,
+        value_name = "NAME",
+        conflicts_with_all = ["packet_ingress_bind", "packet_output_peer"],
+        group = "packet-boundary"
+    )]
+    tun_name: Option<String>,
+    /// Linux TUN MTU. Defaults to 1280 in TUN mode.
+    #[arg(
+        long,
+        value_name = "MTU",
+        value_parser = parse_tun_mtu,
+        conflicts_with_all = ["packet_ingress_bind", "packet_output_peer"]
+    )]
+    tun_mtu: Option<u16>,
     /// Optional exact eight-byte Device IID, encoded as 16 hexadecimal digits.
     #[arg(long, value_name = "HEX", value_parser = parse_iid::parse)]
     device_iid: Option<parse_iid::Iid>,
@@ -73,6 +112,55 @@ struct Cli {
     /// Exit after this many successful compress or decompress operations.
     #[arg(long, value_name = "COUNT")]
     operation_limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum PacketMode {
+    Udp {
+        packet_ingress_bind: SocketAddr,
+        packet_output_peer: SocketAddr,
+    },
+    Tun {
+        name: String,
+        mtu: u16,
+    },
+}
+
+impl Cli {
+    fn packet_mode(&self) -> Result<PacketMode, String> {
+        match (
+            &self.tun_name,
+            self.packet_ingress_bind,
+            self.packet_output_peer,
+        ) {
+            (Some(name), None, None) => Ok(PacketMode::Tun {
+                name: name.clone(),
+                mtu: self.tun_mtu.unwrap_or(1_280),
+            }),
+            (None, Some(packet_ingress_bind), Some(packet_output_peer))
+                if self.tun_mtu.is_none() =>
+            {
+                Ok(PacketMode::Udp {
+                    packet_ingress_bind,
+                    packet_output_peer,
+                })
+            }
+            _ => Err(
+                "choose either --tun-name or both --packet-ingress-bind and --packet-output-peer"
+                    .to_owned(),
+            ),
+        }
+    }
+}
+
+fn parse_tun_mtu(value: &str) -> Result<u16, String> {
+    let mtu = value
+        .parse::<u16>()
+        .map_err(|error| format!("TUN MTU must be an unsigned 16-bit integer: {error}"))?;
+    if mtu < 1_280 {
+        return Err("TUN MTU must be at least 1280 for IPv6".to_owned());
+    }
+    Ok(mtu)
 }
 
 mod parse_iid {
@@ -121,6 +209,7 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
+    let packet_mode = cli.packet_mode()?;
     let role = cli.role;
     let device_id = DeviceId::new(cli.device_id)?;
     let sid = SidRegistry::load_path(cli.sid)?;
@@ -132,11 +221,45 @@ fn run() -> Result<(), Box<dyn Error>> {
     );
     let runtime = Runtime::new(device_id, context, profile)?;
     let node = Node::new(runtime, role.node_role());
+    match packet_mode {
+        PacketMode::Udp {
+            packet_ingress_bind,
+            packet_output_peer,
+        } => run_udp_mode(
+            node,
+            role,
+            cli.link_bind,
+            cli.link_peer,
+            packet_ingress_bind,
+            packet_output_peer,
+            cli.operation_limit,
+        ),
+        PacketMode::Tun { name, mtu } => run_tun_mode(
+            node,
+            role,
+            cli.link_bind,
+            cli.link_peer,
+            name,
+            mtu,
+            cli.operation_limit,
+        ),
+    }
+}
+
+fn run_udp_mode(
+    node: Node,
+    role: Role,
+    link_bind: SocketAddr,
+    link_peer: SocketAddr,
+    packet_ingress_bind: SocketAddr,
+    packet_output_peer: SocketAddr,
+    operation_limit: Option<usize>,
+) -> Result<(), Box<dyn Error>> {
     let config = UdpTransportConfig {
-        link_bind: cli.link_bind,
-        link_peer: cli.link_peer,
-        packet_ingress_bind: cli.packet_ingress_bind,
-        packet_output_peer: cli.packet_output_peer,
+        link_bind,
+        link_peer,
+        packet_ingress_bind,
+        packet_output_peer,
     };
     let transport = UdpTransport::bind(node, config)?;
     transport.set_read_timeout(Some(READ_TIMEOUT))?;
@@ -150,10 +273,10 @@ fn run() -> Result<(), Box<dyn Error>> {
         transport.packet_output_peer(),
     );
     io::Write::flush(&mut io::stdout())?;
-    run_loop(&transport, cli.operation_limit)
+    run_udp_loop(&transport, operation_limit)
 }
 
-fn run_loop(
+fn run_udp_loop(
     transport: &UdpTransport,
     operation_limit: Option<usize>,
 ) -> Result<(), Box<dyn Error>> {
@@ -164,29 +287,31 @@ fn run_loop(
 
     loop {
         successful_operations =
-            run_one("outbound", transport.outbound_once(), successful_operations)?;
+            run_udp_one("outbound", transport.outbound_once(), successful_operations)?;
         if reached_limit(successful_operations, operation_limit) {
             return Ok(());
         }
 
         successful_operations =
-            run_one("inbound", transport.inbound_once(), successful_operations)?;
+            run_udp_one("inbound", transport.inbound_once(), successful_operations)?;
         if reached_limit(successful_operations, operation_limit) {
             return Ok(());
         }
     }
 }
 
-fn run_one(
+fn run_udp_one(
     label: &str,
     result: Result<UdpReport, UdpError>,
     successful_operations: usize,
 ) -> Result<usize, Box<dyn Error>> {
     match result {
         Ok(report) => {
-            eprintln!(
-                "operation={label} rule_id={:?} received={} sent={}",
-                report.rule_id, report.received_bytes, report.sent_bytes
+            print_report(
+                label,
+                report.rule_id,
+                report.received_bytes,
+                report.sent_bytes,
             );
             Ok(successful_operations + 1)
         }
@@ -197,6 +322,104 @@ fn run_one(
         }
         Err(error) => Err(Box::new(error)),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn run_tun_mode(
+    node: Node,
+    role: Role,
+    link_bind: SocketAddr,
+    link_peer: SocketAddr,
+    name: String,
+    mtu: u16,
+    operation_limit: Option<usize>,
+) -> Result<(), Box<dyn Error>> {
+    let device = LinuxTunDevice::create(LinuxTunConfig::new(name, mtu))?;
+    let actual_name = device.interface_name().to_owned();
+    let config = PacketTransportConfig {
+        link_bind,
+        link_peer,
+    };
+    let mut transport = PacketTransport::bind(node, device, config)?;
+    transport.set_read_timeout(Some(READ_TIMEOUT))?;
+
+    println!(
+        "READY role={} tun_name={} mtu={} link_bind={} link_peer={}",
+        role.name(),
+        actual_name,
+        mtu,
+        transport.link_local_addr()?,
+        transport.link_peer(),
+    );
+    io::Write::flush(&mut io::stdout())?;
+    run_tun_loop(&mut transport, operation_limit)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_tun_mode(
+    _node: Node,
+    _role: Role,
+    _link_bind: SocketAddr,
+    _link_peer: SocketAddr,
+    _name: String,
+    _mtu: u16,
+    _operation_limit: Option<usize>,
+) -> Result<(), Box<dyn Error>> {
+    Err("TUN packet-device mode is only supported on Linux".into())
+}
+
+#[cfg(target_os = "linux")]
+fn run_tun_loop(
+    transport: &mut PacketTransport<LinuxTunDevice>,
+    operation_limit: Option<usize>,
+) -> Result<(), Box<dyn Error>> {
+    let mut successful_operations = 0_usize;
+    if operation_limit == Some(0) {
+        return Ok(());
+    }
+
+    loop {
+        successful_operations =
+            run_tun_one("outbound", transport.outbound_once(), successful_operations)?;
+        if reached_limit(successful_operations, operation_limit) {
+            return Ok(());
+        }
+
+        successful_operations =
+            run_tun_one("inbound", transport.inbound_once(), successful_operations)?;
+        if reached_limit(successful_operations, operation_limit) {
+            return Ok(());
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn run_tun_one(
+    label: &str,
+    result: Result<PacketReport, PacketTransportError>,
+    successful_operations: usize,
+) -> Result<usize, Box<dyn Error>> {
+    match result {
+        Ok(report) => {
+            print_report(
+                label,
+                report.rule_id,
+                report.received_bytes,
+                report.sent_bytes,
+            );
+            Ok(successful_operations + 1)
+        }
+        Err(error) if is_packet_timeout(label, &error) => Ok(successful_operations),
+        Err(error) if is_packet_recoverable(&error) => {
+            eprintln!("drop operation={label}: {error}");
+            Ok(successful_operations)
+        }
+        Err(error) => Err(Box::new(error)),
+    }
+}
+
+fn print_report(label: &str, rule_id: schc_core::RuleId, received_bytes: usize, sent_bytes: usize) {
+    eprintln!("operation={label} rule_id={rule_id:?} received={received_bytes} sent={sent_bytes}");
 }
 
 fn reached_limit(successful_operations: usize, operation_limit: Option<usize>) -> bool {
@@ -215,6 +438,28 @@ fn is_recoverable(error: &UdpError) -> bool {
     matches!(
         error,
         UdpError::InvalidIpv6(_) | UdpError::Runtime(_) | UdpError::UnexpectedLinkPeer { .. }
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn is_packet_timeout(operation: &str, error: &PacketTransportError) -> bool {
+    let kind = match error {
+        PacketTransportError::Io(source) => source.kind(),
+        PacketTransportError::Device(PacketDeviceError::Io(source)) if operation == "outbound" => {
+            source.kind()
+        }
+        _ => return false,
+    };
+    matches!(kind, io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)
+}
+
+#[cfg(target_os = "linux")]
+fn is_packet_recoverable(error: &PacketTransportError) -> bool {
+    matches!(
+        error,
+        PacketTransportError::InvalidIpv6(_)
+            | PacketTransportError::Runtime(_)
+            | PacketTransportError::UnexpectedLinkPeer { .. }
     )
 }
 
@@ -245,20 +490,112 @@ mod tests {
         ]
     }
 
+    fn valid_tun_args() -> Vec<&'static str> {
+        vec![
+            "schc-node",
+            "--role",
+            "device",
+            "--sid",
+            "sid.json",
+            "--sor",
+            "rules.sor",
+            "--device-id",
+            "local-device",
+            "--link-bind",
+            "127.0.0.1:10000",
+            "--link-peer",
+            "127.0.0.1:10001",
+            "--tun-name",
+            "schc-test0",
+        ]
+    }
+
     #[test]
     fn parses_role_and_all_explicit_addresses() {
         let cli = Cli::try_parse_from(valid_args()).unwrap();
         assert_eq!(cli.role, Role::Device);
         assert_eq!(cli.link_bind, "127.0.0.1:10000".parse().unwrap());
         assert_eq!(cli.link_peer, "127.0.0.1:10001".parse().unwrap());
-        assert_eq!(cli.packet_ingress_bind, "127.0.0.1:10002".parse().unwrap());
-        assert_eq!(cli.packet_output_peer, "127.0.0.1:10003".parse().unwrap());
+        assert_eq!(
+            cli.packet_ingress_bind,
+            Some("127.0.0.1:10002".parse().unwrap())
+        );
+        assert_eq!(
+            cli.packet_output_peer,
+            Some("127.0.0.1:10003".parse().unwrap())
+        );
+        assert_eq!(cli.tun_name, None);
+        assert_eq!(cli.tun_mtu, None);
         assert_eq!(cli.operation_limit, None);
+        assert!(matches!(cli.packet_mode(), Ok(PacketMode::Udp { .. })));
+    }
+
+    #[test]
+    fn parses_tun_mode_with_default_ipv6_mtu() {
+        let cli = Cli::try_parse_from(valid_tun_args()).unwrap();
+        assert_eq!(cli.packet_ingress_bind, None);
+        assert_eq!(cli.packet_output_peer, None);
+        assert_eq!(
+            cli.packet_mode(),
+            Ok(PacketMode::Tun {
+                name: "schc-test0".to_owned(),
+                mtu: 1_280,
+            })
+        );
     }
 
     #[test]
     fn requires_role_paths_identity_and_addresses() {
         assert!(Cli::try_parse_from(["schc-node"]).is_err());
+    }
+
+    #[test]
+    fn rejects_mixed_packet_boundary_modes() {
+        let mut args = valid_tun_args();
+        args.extend([
+            "--packet-ingress-bind",
+            "127.0.0.1:10002",
+            "--packet-output-peer",
+            "127.0.0.1:10003",
+        ]);
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+
+    #[test]
+    fn rejects_partial_udp_packet_boundary_mode() {
+        let mut args = valid_args();
+        args.truncate(args.len() - 2);
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+
+    #[test]
+    fn rejects_tun_mtu_outside_tun_mode() {
+        let mut args = valid_args();
+        args.extend(["--tun-mtu", "1280"]);
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+
+    #[test]
+    fn rejects_non_ipv6_tun_mtu() {
+        let mut args = valid_tun_args();
+        args.extend(["--tun-mtu", "1279"]);
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn classifies_packet_device_timeout_as_idle() {
+        let timeout = PacketTransportError::Device(PacketDeviceError::Io(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "idle",
+        )));
+        let failure = PacketTransportError::Device(PacketDeviceError::Io(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "closed",
+        )));
+        assert!(is_packet_timeout("outbound", &timeout));
+        assert!(!is_packet_timeout("inbound", &timeout));
+        assert!(!is_packet_timeout("outbound", &failure));
     }
 
     #[test]

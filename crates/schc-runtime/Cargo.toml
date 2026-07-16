@@ -7,9 +7,12 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+clap = { version = "=4.5.50", features = ["derive"] }
 schc-core = { path = "../schc-core" }
 thiserror = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tappers = "=0.4.2"
 
 [dev-dependencies]
 hex = "0.4"

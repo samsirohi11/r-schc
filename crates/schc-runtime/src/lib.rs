@@ -3,6 +3,8 @@
 
 //! Small synchronous SCHC runtime bindings.
 
+#[cfg(target_os = "linux")]
+pub mod linux_tun;
 pub mod packet;
 pub mod udp;
 
