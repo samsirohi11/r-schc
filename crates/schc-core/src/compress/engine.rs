@@ -18,6 +18,7 @@ use crate::TargetValue;
 pub struct CompressedDatagram {
     bytes: Vec<u8>,
     bit_len: usize,
+    rule_id: crate::RuleId,
 }
 
 impl CompressedDatagram {
@@ -31,6 +32,12 @@ impl CompressedDatagram {
     #[must_use]
     pub fn bit_len(&self) -> usize {
         self.bit_len
+    }
+
+    /// Returns the exact `RuleID` selected for this datagram.
+    #[must_use]
+    pub const fn rule_id(&self) -> crate::RuleId {
+        self.rule_id
     }
 }
 
@@ -69,8 +76,9 @@ impl Compressor {
 
     /// Compresses one packet.
     ///
-    /// Rules whose nature is not [`RuleNature::Compression`] or
-    /// [`RuleNature::NoCompression`] are not processed: reaching a
+    /// Rules whose nature is not [`RuleNature::Compression`],
+    /// [`RuleNature::Management`], or [`RuleNature::NoCompression`] are not
+    /// processed: reaching a
     /// fragmentation leaf returns a clear [`SchcError::UnsupportedRuleNature`]
     /// instead of silently compressing. A no-compression rule emits the rule ID
     /// followed by the original packet bytes.
@@ -162,7 +170,7 @@ impl Compressor {
                 .get(rule_order)
                 .map_or(RuleNature::Compression, Rule::nature);
             match nature {
-                RuleNature::Compression => {
+                RuleNature::Compression | RuleNature::Management => {
                     let reconstructed =
                         crate::packet::builder::reconstruct_packet(direction, &state.fields);
                     let suffix = if reconstructed
@@ -185,6 +193,7 @@ impl Compressor {
                             datagram: CompressedDatagram {
                                 bytes: writer.to_vec(),
                                 bit_len: writer.bit_len(),
+                                rule_id,
                             },
                         });
                     }
@@ -622,6 +631,7 @@ fn no_compression_candidate(
         datagram: CompressedDatagram {
             bytes: writer.to_vec(),
             bit_len: writer.bit_len(),
+            rule_id,
         },
     })
 }

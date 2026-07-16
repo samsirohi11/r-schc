@@ -111,6 +111,52 @@ fn loads_ietf_schc_coreconf_field_key_layout() {
 }
 
 #[test]
+fn canonical_sid_coreconf_loads_management_nature_with_current_field_keys() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let root = map(vec![(
+        int(2574),
+        map(vec![(
+            int(23),
+            array(vec![map(vec![
+                (int(1), int(4)),
+                (int(2), int(3)),
+                (int(3), sid_cbor("nature-management")),
+                (
+                    int(23),
+                    array(vec![normal_coreconf_field(CoreconfField {
+                        entry_index: 0,
+                        field_sid: sid_value("fid-ipv6-version"),
+                        length: int(4),
+                        length_value: None,
+                        direction_sid: sid_value("di-bidirectional"),
+                        field_position: 1,
+                        target: Some(target_list(vec![bytes(&[0x06])])),
+                        matching_sid: sid_value("mo-equal"),
+                        matching_value: None,
+                        cda_sid: sid_value("cda-not-sent"),
+                    })]),
+                ),
+            ])]),
+        )]),
+    )]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&root, &mut cbor).unwrap();
+
+    let context = RuleContext::from_cbor_slice(&cbor, registry).unwrap();
+    assert_eq!(
+        context.rules().rules()[0].nature(),
+        schc_core::RuleNature::Management
+    );
+    assert_eq!(
+        context
+            .find_rule(schc_core::RuleId::new(3, 4))
+            .unwrap()
+            .id(),
+        schc_core::RuleId::new(3, 4)
+    );
+}
+
+#[test]
 fn coreconf_field_length_function_uses_key_5_and_6() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     // Field length is a tagged function SID (fl-token-length) with no

@@ -8,9 +8,36 @@ use crate::packet::{
 };
 use crate::rule::{
     Cda, Direction, ExternalValueProvider, FieldLength, FieldRef, FieldRule, MatchingOperator,
-    Position, Rule, RuleContext, TargetValue,
+    Position, Rule, RuleContext, RuleId, TargetValue,
 };
 use std::sync::Arc;
+
+/// Detailed result of SCHC decompression.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DecompressedDatagram {
+    packet: Vec<u8>,
+    rule_id: RuleId,
+}
+
+impl DecompressedDatagram {
+    /// Returns the reconstructed packet bytes.
+    #[must_use]
+    pub fn packet(&self) -> &[u8] {
+        &self.packet
+    }
+
+    /// Returns the exact `RuleID` matched at the start of the SCHC datagram.
+    #[must_use]
+    pub const fn rule_id(&self) -> RuleId {
+        self.rule_id
+    }
+
+    /// Consumes the result and returns the reconstructed packet bytes.
+    #[must_use]
+    pub fn into_packet(self) -> Vec<u8> {
+        self.packet
+    }
+}
 
 /// SCHC decompressor.
 #[derive(Debug, Clone)]
@@ -66,6 +93,23 @@ impl Decompressor {
     /// Returns [`SchcError::InvalidResidue`] when residue bits are malformed or
     /// cannot be reconstructed into a supported packet.
     pub fn decompress(&self, position: Position, compressed: &[u8]) -> Result<Vec<u8>> {
+        self.decompress_detailed(position, compressed)
+            .map(DecompressedDatagram::into_packet)
+    }
+
+    /// Decompresses a padded SCHC datagram and reports its matched `RuleID`.
+    ///
+    /// This preserves the same byte-oriented padding-selection behavior as
+    /// [`Self::decompress`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::decompress`].
+    pub fn decompress_detailed(
+        &self,
+        position: Position,
+        compressed: &[u8],
+    ) -> Result<DecompressedDatagram> {
         let full_len = compressed.len() * 8;
         let minimum = full_len.saturating_sub(7);
         // Try the complete byte slice first. If it contains a structured
@@ -107,6 +151,23 @@ impl Decompressor {
         compressed: &[u8],
         bit_len: usize,
     ) -> Result<Vec<u8>> {
+        self.decompress_with_bit_len_detailed(position, compressed, bit_len)
+            .map(DecompressedDatagram::into_packet)
+    }
+
+    /// Decompresses a datagram with its exact meaningful bit length and
+    /// reports the matched `RuleID`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the meaningful bit length exceeds the input,
+    /// residue cannot be decoded, or packet reconstruction fails.
+    pub fn decompress_with_bit_len_detailed(
+        &self,
+        position: Position,
+        compressed: &[u8],
+        bit_len: usize,
+    ) -> Result<DecompressedDatagram> {
         self.decompress_with_bit_len_policy(position, compressed, bit_len, true)
     }
 
@@ -116,10 +177,11 @@ impl Decompressor {
         compressed: &[u8],
         bit_len: usize,
         allow_unread_suffix: bool,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<DecompressedDatagram> {
         let (rule, mut reader) = select_rule(self.context.rules().rules(), compressed, bit_len)?;
-        match rule.nature() {
-            crate::RuleNature::Compression => {
+        let rule_id = rule.id();
+        let packet = match rule.nature() {
+            crate::RuleNature::Compression | crate::RuleNature::Management => {
                 let direction = inverse_direction(position);
                 let fields = decode_fields(rule, direction, &mut reader, self.provider.as_deref())?;
                 let suffix = if reader.remaining() >= 8 {
@@ -164,7 +226,8 @@ impl Decompressor {
             crate::RuleNature::Fragmentation => Err(SchcError::UnsupportedRuleNature {
                 nature: rule.nature().as_str(),
             }),
-        }
+        }?;
+        Ok(DecompressedDatagram { packet, rule_id })
     }
 
     /// Returns the rule context used by this decompressor.

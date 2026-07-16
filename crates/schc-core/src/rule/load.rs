@@ -215,6 +215,12 @@ impl RuleContext {
     pub fn rules(&self) -> &RuleSet {
         &self.rules
     }
+
+    /// Finds a rule by its exact numeric value and encoded bit length.
+    #[must_use]
+    pub fn find_rule(&self, id: crate::RuleId) -> Option<&Rule> {
+        self.rules.rules().iter().find(|rule| rule.id() == id)
+    }
 }
 
 /// Rejects rule sets where one rule ID is a bit-prefix of another, including
@@ -317,6 +323,7 @@ fn cbor_rule_nature(
         "nature-compression" => Ok(RuleNature::Compression),
         "nature-no-compression" => Ok(RuleNature::NoCompression),
         "nature-fragmentation" => Ok(RuleNature::Fragmentation),
+        "nature-management" => Ok(RuleNature::Management),
         other => Err(SchcError::InvalidRule {
             rule_index,
             reason: format!("unsupported rule nature SID {sid} identifier {other}"),

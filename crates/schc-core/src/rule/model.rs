@@ -59,7 +59,7 @@ impl DirectionSelector {
 }
 
 /// Rule identifier and its encoded bit length.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
 pub struct RuleId {
     value: u64,
     bit_len: usize,
@@ -191,7 +191,8 @@ pub enum Cda {
 /// default to [`RuleNature::Compression`]. Fragmentation is explicitly
 /// unsupported by the core. No-compression rules wrap and unwrap the original
 /// packet bytes with the selected rule ID and no compressed residue
-/// transformation.
+/// transformation. Management rules use the same field semantics as
+/// compression rules; their protection is an integration-layer policy.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum RuleNature {
     /// Compression rule.
@@ -200,6 +201,8 @@ pub enum RuleNature {
     NoCompression,
     /// Fragmentation rule.
     Fragmentation,
+    /// Management rule with compression semantics.
+    Management,
 }
 
 impl RuleNature {
@@ -210,6 +213,7 @@ impl RuleNature {
             Self::Compression => "compression",
             Self::NoCompression => "no-compression",
             Self::Fragmentation => "fragmentation",
+            Self::Management => "management",
         }
     }
 
@@ -224,6 +228,7 @@ impl RuleNature {
             "compression" => Some(Self::Compression),
             "no-compression" => Some(Self::NoCompression),
             "fragmentation" => Some(Self::Fragmentation),
+            "management" | "nature-management" => Some(Self::Management),
             _ => None,
         }
     }

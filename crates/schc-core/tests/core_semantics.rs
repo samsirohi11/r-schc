@@ -17,10 +17,17 @@ fn context_with_registry(
     fields: &[String],
     sid_registry: SidRegistry,
 ) -> RuleContext {
-    let json = format!(
-        r#"{{"rules":[{{"rule_id":{rule_id},"rule_id_length":4,"fields":[{}]}}]}}"#,
-        fields.join(",")
-    );
+    context_with_nature_and_rules(
+        &format!(
+            r#"{{"rule_id":{rule_id},"rule_id_length":4,"fields":[{}]}}"#,
+            fields.join(",")
+        ),
+        sid_registry,
+    )
+}
+
+fn context_with_nature_and_rules(rules: &str, sid_registry: SidRegistry) -> RuleContext {
+    let json = format!(r#"{{"rules":[{rules}]}}"#);
     RuleContext::from_json_str(&json, sid_registry).unwrap()
 }
 
@@ -1031,4 +1038,62 @@ fn variable_byte_and_bit_lsb_prefixes_round_trip() {
         assert_eq!(restored, packet, "LSB {unit} round trip failed");
         assert_eq!(compressed.bit_len(), 4 + 12 + 112);
     }
+}
+
+#[test]
+fn management_rule_compresses_and_reports_exact_rule_id_with_ordinary_rules() {
+    let packet = udp_payload_packet();
+    let management_fields = ipv6_udp_fields();
+    let mut ordinary_fields = ipv6_udp_fields();
+    ordinary_fields[5] = fixed(
+        "fid-ipv6-hoplimit",
+        8,
+        1,
+        "bi",
+        "\"3f\"",
+        "equal",
+        "not-sent",
+    );
+    let context = context_with_nature_and_rules(
+        &format!(
+            r#"{{"rule_id":3,"rule_id_length":4,"nature":"management","fields":[{}]}},{{"rule_id":4,"rule_id_length":4,"fields":[{}]}}"#,
+            management_fields.join(","),
+            ordinary_fields.join(",")
+        ),
+        registry(),
+    );
+
+    assert_eq!(
+        context
+            .find_rule(schc_core::RuleId::new(3, 4))
+            .unwrap()
+            .nature(),
+        schc_core::RuleNature::Management
+    );
+    assert_eq!(
+        context
+            .find_rule(schc_core::RuleId::new(4, 4))
+            .unwrap()
+            .nature(),
+        schc_core::RuleNature::Compression
+    );
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+    assert_eq!(compressed.rule_id(), schc_core::RuleId::new(3, 4));
+
+    let decompressor = Decompressor::new(context).unwrap();
+    let detailed = decompressor
+        .decompress_with_bit_len_detailed(Position::Core, compressed.bytes(), compressed.bit_len())
+        .unwrap();
+    assert_eq!(detailed.packet(), packet);
+    assert_eq!(detailed.rule_id(), schc_core::RuleId::new(3, 4));
+    assert_eq!(
+        decompressor
+            .decompress_with_bit_len(Position::Core, compressed.bytes(), compressed.bit_len())
+            .unwrap(),
+        packet
+    );
 }

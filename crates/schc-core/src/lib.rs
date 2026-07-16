@@ -12,8 +12,8 @@ pub mod rule;
 pub mod sid;
 pub mod tree;
 
-pub use compress::Compressor;
-pub use decompress::Decompressor;
+pub use compress::{CompressedDatagram, Compressor};
+pub use decompress::{DecompressedDatagram, Decompressor};
 pub use error::{Result, SchcError};
 pub use rule::{
     Cda, Direction, DirectionSelector, ExternalValueProvider, FieldLength, FieldRef,

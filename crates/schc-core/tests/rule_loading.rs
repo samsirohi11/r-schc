@@ -2,7 +2,7 @@ use schc_core::rule::LengthUnit;
 use schc_core::tree::DecisionTree;
 use schc_core::{
     Cda, Decompressor, DirectionSelector, FieldLength, FieldRef, MatchingOperator, Position,
-    RuleContext, RuleNature, SchcError, SidRegistry, TargetValue,
+    RuleContext, RuleId, RuleNature, SchcError, SidRegistry, TargetValue,
 };
 
 fn sid_fixture() -> &'static str {
@@ -100,6 +100,22 @@ fn json_rules_parse_nature_and_option_number_fields() {
 }
 
 #[test]
+fn json_management_nature_alias_and_exact_rule_lookup_are_supported() {
+    for nature in ["management", "nature-management"] {
+        let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+        let json = format!(
+            r#"{{"rules":[{{"rule_id":3,"rule_id_length":4,"nature":"{nature}","fields":[]}}]}}"#
+        );
+        let context = RuleContext::from_json_str(&json, registry).unwrap();
+        assert_eq!(
+            context.find_rule(RuleId::new(3, 4)).unwrap().nature(),
+            RuleNature::Management
+        );
+        assert!(context.find_rule(RuleId::new(3, 5)).is_none());
+    }
+}
+
+#[test]
 fn no_compression_rule_decompresses_to_packet_bytes() {
     let registry = SidRegistry::load_path(sid_fixture()).unwrap();
     let json = r#"
@@ -122,6 +138,39 @@ fn no_compression_rule_decompresses_to_packet_bytes() {
         .unwrap();
 
     assert_eq!(restored, [0x20]);
+}
+
+#[test]
+fn detailed_padded_and_exact_bit_wrappers_report_the_same_rule() {
+    let registry = SidRegistry::load_path(sid_fixture()).unwrap();
+    let json =
+        r#"{"rules":[{"rule_id":1,"rule_id_length":4,"nature":"no-compression","fields":[]}] }"#;
+    let context = RuleContext::from_json_str(json, registry).unwrap();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    let detailed = decompressor
+        .decompress_detailed(Position::Core, &[0x12, 0x00])
+        .unwrap();
+    assert_eq!(detailed.packet(), &[0x20]);
+    assert_eq!(detailed.rule_id(), RuleId::new(1, 4));
+    assert_eq!(
+        decompressor
+            .decompress(Position::Core, &[0x12, 0x00])
+            .unwrap(),
+        detailed.packet()
+    );
+
+    let exact = decompressor
+        .decompress_with_bit_len_detailed(Position::Core, &[0x12, 0x00], 12)
+        .unwrap();
+    assert_eq!(exact.packet(), detailed.packet());
+    assert_eq!(exact.rule_id(), detailed.rule_id());
+    assert_eq!(
+        decompressor
+            .decompress_with_bit_len(Position::Core, &[0x12, 0x00], 12)
+            .unwrap(),
+        exact.packet()
+    );
 }
 
 #[test]

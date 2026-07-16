@@ -2,4 +2,4 @@
 
 pub(crate) mod engine;
 
-pub use engine::Decompressor;
+pub use engine::{DecompressedDatagram, Decompressor};
