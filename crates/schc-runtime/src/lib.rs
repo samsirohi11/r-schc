@@ -125,6 +125,60 @@ impl AsRef<[u8]> for SchcFrame {
     }
 }
 
+/// A compressed result with its selected SCHC `RuleID`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct EncodedResult {
+    frame: SchcFrame,
+    rule_id: schc_core::RuleId,
+}
+
+impl EncodedResult {
+    /// Returns the exact-bit SCHC frame.
+    #[must_use]
+    pub const fn frame(&self) -> &SchcFrame {
+        &self.frame
+    }
+
+    /// Returns the `RuleID` selected during compression.
+    #[must_use]
+    pub const fn rule_id(&self) -> schc_core::RuleId {
+        self.rule_id
+    }
+
+    /// Consumes the result and returns the exact-bit frame.
+    #[must_use]
+    pub fn into_frame(self) -> SchcFrame {
+        self.frame
+    }
+}
+
+/// A decompressed result with its matched SCHC `RuleID`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DecodedResult {
+    packet: Vec<u8>,
+    rule_id: schc_core::RuleId,
+}
+
+impl DecodedResult {
+    /// Returns the reconstructed packet bytes.
+    #[must_use]
+    pub fn packet(&self) -> &[u8] {
+        &self.packet
+    }
+
+    /// Returns the `RuleID` matched during decompression.
+    #[must_use]
+    pub const fn rule_id(&self) -> schc_core::RuleId {
+        self.rule_id
+    }
+
+    /// Consumes the result and returns the reconstructed packet bytes.
+    #[must_use]
+    pub fn into_packet(self) -> Vec<u8> {
+        self.packet
+    }
+}
+
 /// Error returned when compressed frame storage is not canonical.
 #[derive(Debug, Clone, Eq, Error, PartialEq)]
 pub enum FrameError {
@@ -320,12 +374,43 @@ impl Runtime {
         })
     }
 
-    /// Encodes one packet using explicit device, endpoint, and flow metadata.
+    /// Returns the device identifier bound to this runtime.
+    #[must_use]
+    pub const fn device_id(&self) -> &DeviceId {
+        &self.device_id
+    }
+
+    /// Encodes one packet and reports the selected `RuleID`.
     ///
     /// # Errors
     ///
     /// Returns a typed runtime error for a wrong device, invalid endpoint path,
     /// unsupported fragmentation, non-canonical core output, or a core failure.
+    pub fn encode_detailed(
+        &self,
+        device: &DeviceId,
+        endpoint: Endpoint,
+        flow: PacketFlow,
+        packet: &[u8],
+    ) -> Result<EncodedResult, RuntimeError> {
+        self.ensure_device(device)?;
+        let direction = encode_direction(endpoint, flow)?;
+        let compressed = self
+            .compressor
+            .compress(direction, packet)
+            .map_err(map_core_error)?;
+        let rule_id = compressed.rule_id();
+        let frame = SchcFrame::new(compressed.bytes().to_vec(), compressed.bit_len())?;
+        Ok(EncodedResult { frame, rule_id })
+    }
+
+    /// Encodes one packet using explicit device, endpoint, and flow metadata.
+    ///
+    /// This compatibility wrapper returns only the exact-bit frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors described by [`Self::encode_detailed`].
     pub fn encode(
         &self,
         device: &DeviceId,
@@ -333,23 +418,43 @@ impl Runtime {
         flow: PacketFlow,
         packet: &[u8],
     ) -> Result<SchcFrame, RuntimeError> {
-        self.ensure_device(device)?;
-        let direction = encode_direction(endpoint, flow)?;
-        let compressed = self
-            .compressor
-            .compress(direction, packet)
-            .map_err(map_core_error)?;
-        SchcFrame::new(compressed.bytes().to_vec(), compressed.bit_len()).map_err(Into::into)
+        self.encode_detailed(device, endpoint, flow, packet)
+            .map(EncodedResult::into_frame)
     }
 
-    /// Decodes one frame using explicit device, endpoint, and flow metadata.
-    ///
-    /// The runtime always preserves the frame's exact meaningful bit length.
+    /// Decodes one exact-bit frame and reports the matched `RuleID`.
     ///
     /// # Errors
     ///
     /// Returns a typed runtime error for a wrong device, invalid endpoint path,
     /// unsupported fragmentation, or a core failure.
+    pub fn decode_detailed(
+        &self,
+        device: &DeviceId,
+        endpoint: Endpoint,
+        flow: PacketFlow,
+        frame: &SchcFrame,
+    ) -> Result<DecodedResult, RuntimeError> {
+        self.ensure_device(device)?;
+        let position = decode_position(endpoint, flow)?;
+        let decoded = self
+            .decompressor
+            .decompress_with_bit_len_detailed(position, frame.bytes(), frame.bit_len())
+            .map_err(map_core_error)?;
+        let rule_id = decoded.rule_id();
+        Ok(DecodedResult {
+            packet: decoded.into_packet(),
+            rule_id,
+        })
+    }
+
+    /// Decodes one exact-bit frame using explicit device, endpoint, and flow metadata.
+    ///
+    /// This compatibility wrapper returns only reconstructed packet bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors described by [`Self::decode_detailed`].
     pub fn decode(
         &self,
         device: &DeviceId,
@@ -357,11 +462,54 @@ impl Runtime {
         flow: PacketFlow,
         frame: &SchcFrame,
     ) -> Result<Vec<u8>, RuntimeError> {
+        self.decode_detailed(device, endpoint, flow, frame)
+            .map(DecodedResult::into_packet)
+    }
+
+    /// Decodes raw octet-padded SCHC Packet bytes and reports the matched `RuleID`.
+    ///
+    /// The input contains only the SCHC Packet and lower-layer zero padding.
+    /// No meaningful bit length or runtime metadata is carried in the bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors described by the core padded decompression operation.
+    pub fn decode_padded_detailed(
+        &self,
+        device: &DeviceId,
+        endpoint: Endpoint,
+        flow: PacketFlow,
+        bytes: &[u8],
+    ) -> Result<DecodedResult, RuntimeError> {
         self.ensure_device(device)?;
         let position = decode_position(endpoint, flow)?;
-        self.decompressor
-            .decompress_with_bit_len(position, frame.bytes(), frame.bit_len())
-            .map_err(map_core_error)
+        let decoded = self
+            .decompressor
+            .decompress_detailed(position, bytes)
+            .map_err(map_core_error)?;
+        let rule_id = decoded.rule_id();
+        Ok(DecodedResult {
+            packet: decoded.into_packet(),
+            rule_id,
+        })
+    }
+
+    /// Decodes raw octet-padded SCHC Packet bytes.
+    ///
+    /// This compatibility wrapper returns only reconstructed packet bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors described by [`Self::decode_padded_detailed`].
+    pub fn decode_padded(
+        &self,
+        device: &DeviceId,
+        endpoint: Endpoint,
+        flow: PacketFlow,
+        bytes: &[u8],
+    ) -> Result<Vec<u8>, RuntimeError> {
+        self.decode_padded_detailed(device, endpoint, flow, bytes)
+            .map(DecodedResult::into_packet)
     }
 
     fn ensure_device(&self, device: &DeviceId) -> Result<(), RuntimeError> {
@@ -370,6 +518,93 @@ impl Runtime {
         } else {
             Err(RuntimeError::WrongDevice)
         }
+    }
+}
+
+/// The role of a node participating in a point-to-point SCHC link.
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
+pub enum NodeRole {
+    /// Compresses downlink packets and decompresses uplink packets.
+    Core,
+    /// Compresses uplink packets and decompresses downlink packets.
+    Device,
+}
+
+impl NodeRole {
+    /// Returns the only valid outbound endpoint and flow for this role.
+    #[must_use]
+    pub const fn outbound(self) -> (Endpoint, PacketFlow) {
+        match self {
+            Self::Core => (Endpoint::Core, PacketFlow::Downlink),
+            Self::Device => (Endpoint::Device, PacketFlow::Uplink),
+        }
+    }
+
+    /// Returns the only valid inbound endpoint and flow for this role.
+    #[must_use]
+    pub const fn inbound(self) -> (Endpoint, PacketFlow) {
+        match self {
+            Self::Core => (Endpoint::Core, PacketFlow::Uplink),
+            Self::Device => (Endpoint::Device, PacketFlow::Downlink),
+        }
+    }
+}
+
+/// A point-to-point node facade around one SCHC runtime.
+#[derive(Debug)]
+pub struct Node {
+    runtime: Runtime,
+    role: NodeRole,
+}
+
+impl Node {
+    /// Creates a node with a fixed role and one owned runtime.
+    #[must_use]
+    pub const fn new(runtime: Runtime, role: NodeRole) -> Self {
+        Self { runtime, role }
+    }
+
+    /// Returns this node's configured role.
+    #[must_use]
+    pub const fn role(&self) -> NodeRole {
+        self.role
+    }
+
+    /// Returns the local device identifier without serializing it.
+    #[must_use]
+    pub const fn device_id(&self) -> &DeviceId {
+        self.runtime.device_id()
+    }
+
+    /// Returns the underlying runtime for read-only inspection.
+    #[must_use]
+    pub const fn runtime(&self) -> &Runtime {
+        &self.runtime
+    }
+
+    /// Compresses one outbound packet into a raw padded SCHC Packet.
+    ///
+    /// The returned frame bytes contain only the SCHC Packet and its canonical
+    /// zero padding. No device identifier or bit-length metadata is added.
+    ///
+    /// # Errors
+    ///
+    /// Returns a runtime error when compression fails.
+    pub fn outbound(&self, packet: &[u8]) -> Result<EncodedResult, RuntimeError> {
+        let (endpoint, flow) = self.role.outbound();
+        self.runtime
+            .encode_detailed(self.device_id(), endpoint, flow, packet)
+    }
+
+    /// Decompresses one raw padded SCHC Packet received from the peer.
+    ///
+    /// # Errors
+    ///
+    /// Returns a runtime error when padded decompression fails.
+    pub fn inbound(&self, bytes: &[u8]) -> Result<DecodedResult, RuntimeError> {
+        let (endpoint, flow) = self.role.inbound();
+        self.runtime
+            .decode_padded_detailed(self.device_id(), endpoint, flow, bytes)
     }
 }
 
