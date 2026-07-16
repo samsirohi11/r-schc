@@ -3,6 +3,7 @@
 
 //! Small synchronous SCHC runtime bindings.
 
+pub mod packet;
 pub mod udp;
 
 use schc_core::{
