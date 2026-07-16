@@ -109,4 +109,11 @@ pub enum SchcError {
     /// A residue or mapping value is invalid.
     #[error("invalid residue: {0}")]
     InvalidResidue(String),
+
+    /// More than one meaningful bit length produced a valid padded decode.
+    #[error("ambiguous SCHC padding: valid meaningful bit lengths {bit_lengths:?}")]
+    AmbiguousPadding {
+        /// Candidate meaningful bit lengths that decoded successfully.
+        bit_lengths: Vec<usize>,
+    },
 }

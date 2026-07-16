@@ -3,7 +3,7 @@
 use crate::error::{Result, SchcError};
 use crate::packet::checksum::transport_checksum;
 use crate::packet::field::{FieldKey, FieldStore, FieldValue, PacketScope};
-use crate::packet::{CoapMessage, CoapOption, Icmpv6Message, Ipv6Packet};
+use crate::packet::{CoapMessage, CoapOption, Icmpv6Message, Ipv6Packet, UdpDatagram};
 use crate::rule::{Direction, FieldRef};
 
 /// Reconstructs a full IPv6 packet from decoded fields.
@@ -16,7 +16,9 @@ use crate::rule::{Direction, FieldRef};
 /// Returns [`SchcError::InvalidResidue`] when required fields are missing,
 /// out of range, or the next-header value is unsupported.
 pub(crate) fn reconstruct_packet(direction: Direction, fields: &FieldStore) -> Result<Vec<u8>> {
-    reconstruct_packet_at(direction, fields, PacketScope::Outer)
+    let packet = reconstruct_packet_at(direction, fields, PacketScope::Outer)?;
+    crate::packet::validate_packet_lengths(&packet)?;
+    Ok(packet)
 }
 
 /// Reconstructs a packet and appends the unread wire suffix carried by a
@@ -36,9 +38,9 @@ pub(crate) fn reconstruct_packet_with_suffix(
             FieldKey::with_scope(FieldRef::Payload, 1, 0, PacketScope::Outer),
             FieldValue::from_bytes(suffix.to_vec(), suffix.len() * 8)?,
         );
-        reconstruct_packet(direction, &fields_with_payload)?
+        reconstruct_packet_at(direction, &fields_with_payload, PacketScope::Outer)?
     } else {
-        reconstruct_packet(direction, fields)?
+        reconstruct_packet_at(direction, fields, PacketScope::Outer)?
     };
     if !inject_icmp_payload {
         packet.extend_from_slice(suffix);
@@ -116,16 +118,14 @@ pub(crate) fn reconstruct_packet_with_suffix(
         }
         _ => {}
     }
+    crate::packet::validate_packet_lengths(&packet)?;
     Ok(packet)
 }
 
 fn validate_embedded_ipv6_suffix(suffix: &[u8]) -> Result<()> {
     let embedded = Ipv6Packet::parse(suffix)?;
-    if embedded.to_vec().len() != suffix.len() {
-        return Err(SchcError::Packet {
-            protocol: "IPv6",
-            reason: "payload length does not cover complete packet".to_owned(),
-        });
+    if embedded.next_header() == 17 {
+        UdpDatagram::parse(embedded.payload())?;
     }
     Ok(())
 }

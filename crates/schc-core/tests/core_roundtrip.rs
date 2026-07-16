@@ -228,6 +228,17 @@ fn no_compression_fallback_selected_only_when_no_compression_rule_matches() {
 }
 
 #[test]
+fn exact_bit_api_rejects_sub_byte_padding_inside_meaningful_boundary() {
+    let decompressor = Decompressor::new(no_compression_non_byte_aligned_context()).unwrap();
+    let error = decompressor
+        .decompress_with_bit_len(Position::Core, &[0x30], 8)
+        .unwrap_err();
+    assert!(
+        matches!(error, SchcError::InvalidResidue(reason) if reason.contains("not byte aligned"))
+    );
+}
+
+#[test]
 fn no_compression_decompression_rejects_nonzero_padding() {
     let context = no_compression_non_byte_aligned_context();
     let decompressor = Decompressor::new(context).unwrap();
@@ -610,24 +621,17 @@ fn nonzero_padding_error_identifies_padding() {
     );
 }
 
-/// Asserts that full-byte trailing residue requires an exact meaningful bit length.
+/// Asserts that a byte-oriented SCHC Packet can recover a complete unread
+/// suffix without an out-of-band meaningful bit length.
 #[test]
-fn trailing_residue_error_requires_exact_bit_length() {
+fn padded_header_only_suffix_round_trips_without_exact_bit_length() {
     let decompressor = Decompressor::new(canonical_context()).unwrap();
     let compressed = [0x11, b'u', b'n', b'r', b'e', b'a', b'd'];
-
-    let message = decompressor
+    let restored = decompressor
         .decompress(Position::Core, &compressed)
-        .unwrap_err()
-        .to_string();
-    assert!(
-        message.contains("residue"),
-        "error must identify the residue operation, got: {message}"
-    );
-    assert!(
-        message.contains("decompress_with_bit_len"),
-        "error must name the exact-bit API, got: {message}"
-    );
+        .unwrap();
+
+    assert_eq!(restored, canonical_unread_payload_packet());
 }
 
 /// Asserts that a mapping-index-out-of-range error message identifies the

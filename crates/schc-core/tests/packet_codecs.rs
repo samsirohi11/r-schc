@@ -25,7 +25,7 @@ fn ipv6_udp_coap_packet_round_trips() {
 }
 
 #[test]
-fn ipv6_rejects_truncated_headers_wrong_version_and_short_payloads() {
+fn ipv6_rejects_truncated_headers_wrong_version_short_payloads_and_trailing_bytes() {
     assert!(Ipv6Packet::parse(&[0; 39]).is_err());
 
     let mut wrong_version = [0; 40];
@@ -36,10 +36,14 @@ fn ipv6_rejects_truncated_headers_wrong_version_and_short_payloads() {
     short_payload[0] = 0x60;
     short_payload[5] = 1;
     assert!(Ipv6Packet::parse(&short_payload).is_err());
+
+    let mut trailing = vec![0; 41];
+    trailing[0] = 0x60;
+    assert!(Ipv6Packet::parse(&trailing).is_err());
 }
 
 #[test]
-fn udp_rejects_truncated_and_invalid_lengths() {
+fn udp_rejects_truncated_invalid_lengths_and_trailing_bytes() {
     assert!(UdpDatagram::parse(&[0; 7]).is_err());
 
     let too_small = [0, 0, 0, 0, 0, 7, 0, 0];
@@ -47,6 +51,9 @@ fn udp_rejects_truncated_and_invalid_lengths() {
 
     let too_large = [0, 0, 0, 0, 0, 9, 0, 0];
     assert!(UdpDatagram::parse(&too_large).is_err());
+
+    let trailing = [0, 0, 0, 0, 0, 8, 0, 0, 1];
+    assert!(UdpDatagram::parse(&trailing).is_err());
 }
 
 #[test]

@@ -212,6 +212,43 @@ fn ipv6_icmp_fields() -> Vec<String> {
     fields
 }
 
+fn sent_length_context() -> RuleContext {
+    let mut fields = ipv6_udp_fields();
+    fields[3] = fixed(
+        "fid-ipv6-payload-length",
+        16,
+        1,
+        "bi",
+        "null",
+        "ignore",
+        "value-sent",
+    );
+    fields[12] = fixed(
+        "fid-udp-length",
+        16,
+        1,
+        "bi",
+        "null",
+        "ignore",
+        "value-sent",
+    );
+    context(11, &fields)
+}
+
+fn overwrite_bits(bytes: &mut [u8], start: usize, bit_len: usize, value: u64) {
+    for index in 0..bit_len {
+        let source_shift = bit_len - index - 1;
+        let bit = ((value >> source_shift) & 1) != 0;
+        let byte = &mut bytes[(start + index) / 8];
+        let shift = 7 - ((start + index) % 8);
+        if bit {
+            *byte |= 1 << shift;
+        } else {
+            *byte &= !(1 << shift);
+        }
+    }
+}
+
 fn udp_payload_packet() -> Vec<u8> {
     hex::decode(
         "60000000000d114020010db8000000000000000000000001\
@@ -763,7 +800,7 @@ fn mixed_direction_entries_skip_inactive_entry_and_continue() {
 }
 
 #[test]
-fn byte_slice_rejects_header_only_udp_suffix() {
+fn byte_slice_decodes_header_only_udp_suffix_with_unique_padding() {
     let packet = udp_payload_packet();
     let context = context(3, &ipv6_udp_fields());
     let compressed = Compressor::new(context.clone())
@@ -777,13 +814,10 @@ fn byte_slice_rejects_header_only_udp_suffix() {
         .unwrap();
     assert_eq!(exact, packet);
 
-    let error = decompressor
+    let padded = decompressor
         .decompress(Position::Core, compressed.bytes())
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "invalid residue: unread packet suffix requires decompress_with_bit_len for exact bit length"
-    );
+        .unwrap();
+    assert_eq!(padded, packet);
 }
 
 #[test]
@@ -1020,6 +1054,46 @@ fn coap_header_only_suffix_tracks_repeated_option_boundary() {
         .compress(Direction::Up, &packet)
         .unwrap_err();
     assert!(matches!(error, SchcError::NoMatchingRule));
+}
+
+#[test]
+fn decompression_rejects_inconsistent_sent_ipv6_and_udp_lengths() {
+    let packet = udp_payload_packet();
+    let context = sent_length_context();
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+    let decompressor = Decompressor::new(context).unwrap();
+
+    let mut bad_ipv6 = compressed.bytes().to_vec();
+    // Only the two value-sent length fields contribute residue bits in this
+    // rule; IPv6 payload length is first after the RuleID.
+    overwrite_bits(&mut bad_ipv6, 4, 16, 12);
+    let ipv6_error = decompressor
+        .decompress_with_bit_len(Position::Core, &bad_ipv6, compressed.bit_len())
+        .unwrap_err();
+    assert!(matches!(
+        ipv6_error,
+        SchcError::Packet {
+            protocol: "IPv6",
+            ..
+        }
+    ));
+
+    let mut bad_udp = compressed.bytes().to_vec();
+    // UDP length follows the first 16-bit sent IPv6 length.
+    overwrite_bits(&mut bad_udp, 20, 16, 12);
+    let udp_error = decompressor
+        .decompress_with_bit_len(Position::Core, &bad_udp, compressed.bit_len())
+        .unwrap_err();
+    assert!(matches!(
+        udp_error,
+        SchcError::Packet {
+            protocol: "UDP",
+            ..
+        }
+    ));
 }
 
 #[test]

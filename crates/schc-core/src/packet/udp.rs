@@ -14,7 +14,7 @@ impl UdpDatagram {
     ///
     /// Returns [`SchcError::Packet`] when the input is shorter than the UDP
     /// header, declares a length smaller than the header, or declares a length
-    /// larger than the available bytes.
+    /// that does not exactly match the available bytes.
     pub fn parse(input: &[u8]) -> Result<Self> {
         if input.len() < 8 {
             return Err(packet_error("UDP", "datagram shorter than 8-byte header"));
@@ -25,12 +25,17 @@ impl UdpDatagram {
             return Err(packet_error("UDP", "length is smaller than 8 bytes"));
         }
 
-        if length > input.len() {
-            return Err(packet_error("UDP", "length exceeds available bytes"));
+        if length != input.len() {
+            let reason = if length > input.len() {
+                "length exceeds available bytes"
+            } else {
+                "length is smaller than available bytes"
+            };
+            return Err(packet_error("UDP", reason));
         }
 
         Ok(Self {
-            bytes: input[..length].to_vec(),
+            bytes: input.to_vec(),
             payload_offset: 8,
         })
     }

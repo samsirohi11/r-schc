@@ -195,6 +195,14 @@ fn assert_vector_round_trip(context: &RuleContext, compressor: &Compressor, vect
             .unwrap_or_else(|error| panic!("{} decompression failed: {error}", vector.name))
     };
     assert_eq!(restored, packet, "{} packet changed", vector.name);
+
+    if vector.bit_len % 8 != 0 && vector.provider.is_none() {
+        let padded = Decompressor::new(context.clone())
+            .unwrap()
+            .decompress(position, &expected)
+            .unwrap_or_else(|error| panic!("{} padded decompression failed: {error}", vector.name));
+        assert_eq!(padded, packet, "{} padded packet changed", vector.name);
+    }
 }
 
 #[test]

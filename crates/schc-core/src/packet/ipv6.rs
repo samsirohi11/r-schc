@@ -14,8 +14,8 @@ impl Ipv6Packet {
     /// # Errors
     ///
     /// Returns [`SchcError::Packet`] when the input is shorter than the fixed
-    /// IPv6 header, has a non-IPv6 version, or declares a payload length larger
-    /// than the available bytes.
+    /// IPv6 header, has a non-IPv6 version, or declares a payload length that
+    /// does not exactly match the available bytes.
     pub fn parse(input: &[u8]) -> Result<Self> {
         if input.len() < 40 {
             return Err(packet_error("IPv6", "packet shorter than 40-byte header"));
@@ -30,15 +30,17 @@ impl Ipv6Packet {
             .checked_add(payload_len)
             .ok_or_else(|| packet_error("IPv6", "payload length overflows packet length"))?;
 
-        if total_len > input.len() {
-            return Err(packet_error(
-                "IPv6",
-                "payload length exceeds available bytes",
-            ));
+        if total_len != input.len() {
+            let reason = if total_len > input.len() {
+                "payload length exceeds available bytes"
+            } else {
+                "payload length is smaller than available bytes"
+            };
+            return Err(packet_error("IPv6", reason));
         }
 
         Ok(Self {
-            bytes: input[..total_len].to_vec(),
+            bytes: input.to_vec(),
             payload_offset: 40,
             payload_len,
         })

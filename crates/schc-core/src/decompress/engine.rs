@@ -92,6 +92,8 @@ impl Decompressor {
     /// fragmentation rule.
     /// Returns [`SchcError::InvalidResidue`] when residue bits are malformed or
     /// cannot be reconstructed into a supported packet.
+    /// Returns [`SchcError::AmbiguousPadding`] when multiple meaningful bit
+    /// lengths decode successfully.
     pub fn decompress(&self, position: Position, compressed: &[u8]) -> Result<Vec<u8>> {
         self.decompress_detailed(position, compressed)
             .map(DecompressedDatagram::into_packet)
@@ -99,47 +101,55 @@ impl Decompressor {
 
     /// Decompresses a padded SCHC datagram and reports its matched `RuleID`.
     ///
-    /// This preserves the same byte-oriented padding-selection behavior as
-    /// [`Self::decompress`].
+    /// This evaluates each permissible zero-padding length and requires a
+    /// unique meaningful bit length.
     ///
     /// # Errors
     ///
-    /// Returns the same errors as [`Self::decompress`].
+    /// Returns [`SchcError::AmbiguousPadding`] when multiple meaningful bit
+    /// lengths decode successfully.
     pub fn decompress_detailed(
         &self,
         position: Position,
         compressed: &[u8],
     ) -> Result<DecompressedDatagram> {
         let full_len = compressed.len() * 8;
-        let minimum = full_len.saturating_sub(7);
-        // Try the complete byte slice first. If it contains a structured
-        // unread suffix, do not reinterpret trailing zero bits as padding and
-        // accidentally accept the same full-byte suffix through a shorter
-        // candidate length.
-        let mut last_error =
-            match self.decompress_with_bit_len_policy(position, compressed, full_len, false) {
-                Ok(packet) => return Ok(packet),
-                Err(error) if is_exact_bit_length_required(&error) => return Err(error),
-                Err(error) => Some(error),
-            };
+        let mut successes = Vec::new();
+        let mut last_error = None;
 
-        for bit_len in (minimum..full_len).rev() {
-            if !zero_padding_bits(compressed, bit_len) {
+        for padding_bits in 0..=full_len.min(7) {
+            let bit_len = full_len - padding_bits;
+            if padding_bits != 0 && !zero_padding_bits(compressed, bit_len) {
                 continue;
             }
-            match self.decompress_with_bit_len_policy(position, compressed, bit_len, false) {
-                Ok(packet) => return Ok(packet),
-                Err(error) => last_error = Some(error),
+            match self.decompress_with_bit_len_policy(position, compressed, bit_len) {
+                Ok(packet) => successes.push((bit_len, packet)),
+                Err(error) => {
+                    if last_error.is_none() {
+                        last_error = Some(error);
+                    }
+                }
             }
         }
-        Err(last_error.unwrap_or(SchcError::NoMatchingRule))
+
+        if successes.is_empty() {
+            return Err(last_error.unwrap_or(SchcError::NoMatchingRule));
+        }
+
+        let mut bit_lengths = successes.iter().map(|(bit_len, _)| *bit_len).collect();
+        let selected_bit_len = unique_padding_bit_length(&mut bit_lengths)?;
+        successes
+            .into_iter()
+            .find(|(bit_len, _)| *bit_len == selected_bit_len)
+            .map(|(_, packet)| packet)
+            .ok_or(SchcError::NoMatchingRule)
     }
 
     /// Decompresses a datagram while retaining its exact meaningful bit length.
     ///
-    /// This entry point is required when a header-only rule carries an unread
-    /// byte suffix. The compatible [`Self::decompress`] API treats up to seven
-    /// trailing zero bits as padding and rejects full-byte trailing residue.
+    /// This entry point accepts the exact meaningful bit length, including a
+    /// byte-aligned unread suffix carried by a header-only rule. It never
+    /// consumes sub-byte padding inside the supplied boundary.
     ///
     /// # Errors
     ///
@@ -168,7 +178,7 @@ impl Decompressor {
         compressed: &[u8],
         bit_len: usize,
     ) -> Result<DecompressedDatagram> {
-        self.decompress_with_bit_len_policy(position, compressed, bit_len, true)
+        self.decompress_with_bit_len_policy(position, compressed, bit_len)
     }
 
     fn decompress_with_bit_len_policy(
@@ -176,7 +186,6 @@ impl Decompressor {
         position: Position,
         compressed: &[u8],
         bit_len: usize,
-        allow_unread_suffix: bool,
     ) -> Result<DecompressedDatagram> {
         let (rule, mut reader) = select_rule(self.context.rules().rules(), compressed, bit_len)?;
         let rule_id = rule.id();
@@ -198,11 +207,6 @@ impl Decompressor {
                             "{} trailing residue bits remain",
                             reader.remaining()
                         )));
-                    }
-                    if !allow_unread_suffix {
-                        return Err(SchcError::InvalidResidue(
-                            EXACT_BIT_LENGTH_REQUIRED.to_owned(),
-                        ));
                     }
                     if reader.remaining() % 8 != 0 {
                         return Err(SchcError::InvalidResidue(format!(
@@ -237,18 +241,23 @@ impl Decompressor {
     }
 }
 
-const EXACT_BIT_LENGTH_REQUIRED: &str =
-    "unread packet suffix requires decompress_with_bit_len for exact bit length";
-
-fn is_exact_bit_length_required(error: &SchcError) -> bool {
-    matches!(error, SchcError::InvalidResidue(reason) if reason == EXACT_BIT_LENGTH_REQUIRED)
-}
-
 fn zero_padding_bits(bytes: &[u8], bit_len: usize) -> bool {
     (bit_len..bytes.len() * 8).all(|index| {
         let shift = 7 - (index % 8);
         (bytes[index / 8] >> shift) & 1 == 0
     })
+}
+
+fn unique_padding_bit_length(lengths: &mut Vec<usize>) -> Result<usize> {
+    lengths.sort_unstable();
+    lengths.dedup();
+    match lengths.as_slice() {
+        [bit_len] => Ok(*bit_len),
+        [] => Err(SchcError::NoMatchingRule),
+        _ => Err(SchcError::AmbiguousPadding {
+            bit_lengths: lengths.clone(),
+        }),
+    }
 }
 
 fn select_rule<'a>(
@@ -547,31 +556,51 @@ fn validate_padding(reader: &mut BitReader<'_>) -> Result<()> {
         )));
     }
 
+    let remaining = reader.remaining();
+    let mut nonzero = false;
     while reader.remaining() > 0 {
-        if reader.read_bits(1)? != 0 {
-            return Err(SchcError::InvalidResidue(
-                "non-zero padding bit after structured residue".to_owned(),
-            ));
-        }
+        nonzero |= reader.read_bits(1)? != 0;
+    }
+    if nonzero {
+        return Err(SchcError::InvalidResidue(
+            "non-zero padding bit after structured residue".to_owned(),
+        ));
+    }
+    if remaining != 0 {
+        return Err(SchcError::InvalidResidue(format!(
+            "meaningful bit length includes {remaining} trailing zero bits"
+        )));
     }
     Ok(())
 }
 
-/// Decodes a no-compression payload by reading every full byte that follows
-/// the rule ID. The packet is byte-aligned, so the number of packet bits is
-/// the largest multiple of eight that fits in the remaining bits; the leftover
-/// bits are zero padding and are validated.
+/// Decodes a no-compression payload by reading every byte that follows the
+/// rule ID. The exact meaningful length must leave a whole number of packet
+/// bytes; lower-layer padding is removed by the byte-oriented caller before
+/// this function is reached.
 fn decode_no_compression_payload(reader: &mut BitReader<'_>) -> Result<Vec<u8>> {
     let remaining = reader.remaining();
-    let packet_bits = (remaining / 8) * 8;
-    let packet = reader.read_bytes_padded(packet_bits)?;
-    validate_padding(reader)?;
+    if remaining % 8 != 0 {
+        let mut tail = reader.clone();
+        tail.set_position(reader.position() + remaining - (remaining % 8))?;
+        let nonzero = (0..tail.remaining()).any(|_| tail.read_bits(1).is_ok_and(|bit| bit != 0));
+        let reason = if nonzero {
+            "non-zero padding bit after no-compression packet"
+        } else {
+            "no-compression packet is not byte aligned"
+        };
+        return Err(SchcError::InvalidResidue(format!(
+            "{reason}: {remaining} trailing bits remain"
+        )));
+    }
+    let packet = reader.read_bytes_padded(remaining)?;
+    crate::packet::validate_packet_lengths(&packet)?;
     Ok(packet)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_lsb, select_rule};
+    use super::{decode_lsb, select_rule, unique_padding_bit_length};
     use crate::bit::BitReader;
     use crate::packet::checksum::transport_checksum;
     use crate::rule::FieldRule;
@@ -591,6 +620,17 @@ mod tests {
             action: Cda::Lsb,
             entry_index: 0,
         }
+    }
+
+    #[test]
+    fn ambiguous_padding_is_typed_and_lists_valid_lengths() {
+        let mut lengths = vec![12, 8, 12];
+        let error = unique_padding_bit_length(&mut lengths).unwrap_err();
+        assert!(matches!(
+            error,
+            crate::SchcError::AmbiguousPadding { ref bit_lengths }
+                if bit_lengths == &vec![8, 12]
+        ));
     }
 
     #[test]
