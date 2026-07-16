@@ -3,6 +3,8 @@
 
 //! Small synchronous SCHC runtime bindings.
 
+pub mod udp;
+
 use schc_core::{
     Compressor, Decompressor, Direction, ExternalValueProvider, FieldRef, Position, RuleContext,
     SchcError,
