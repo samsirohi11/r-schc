@@ -7,6 +7,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 schc-core = { path = "../schc-core" }
 thiserror = "1"
 
