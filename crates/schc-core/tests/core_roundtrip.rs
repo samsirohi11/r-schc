@@ -32,6 +32,22 @@ fn no_compression_byte_aligned_context() -> RuleContext {
     RuleContext::from_json_str(json, registry).unwrap()
 }
 
+/// A zero-entry compression rule that carries the complete packet as residue.
+fn empty_compression_context() -> RuleContext {
+    let registry = SidRegistry::default();
+    let json = r#"
+    {
+      "rules": [{
+        "rule_id": 16,
+        "rule_id_length": 8,
+        "nature": "compression",
+        "fields": []
+      }]
+    }
+    "#;
+    RuleContext::from_json_str(json, registry).unwrap()
+}
+
 /// A no-compression rule context with a non-byte-aligned 4-bit rule ID.
 fn no_compression_non_byte_aligned_context() -> RuleContext {
     let registry = SidRegistry::default();
@@ -115,6 +131,25 @@ fn no_compression_byte_aligned_round_trip_restores_packet() {
         .decompress(Position::Core, compressed.bytes())
         .unwrap();
 
+    assert_eq!(restored, packet);
+}
+
+#[test]
+fn empty_compression_rule_round_trip_carries_complete_packet() {
+    let context = empty_compression_context();
+    let packet = coap_get_packet();
+
+    let compressed = Compressor::new(context.clone())
+        .unwrap()
+        .compress(Direction::Up, &packet)
+        .unwrap();
+    let restored = Decompressor::new(context)
+        .unwrap()
+        .decompress(Position::Core, compressed.bytes())
+        .unwrap();
+
+    assert_eq!(compressed.rule_id(), schc_core::RuleId::new(16, 8));
+    assert_eq!(compressed.bytes(), expected_no_compression(16, 8, &packet));
     assert_eq!(restored, packet);
 }
 

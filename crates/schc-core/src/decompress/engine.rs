@@ -191,39 +191,44 @@ impl Decompressor {
         let rule_id = rule.id();
         let packet = match rule.nature() {
             crate::RuleNature::Compression | crate::RuleNature::Management => {
-                let direction = inverse_direction(position);
-                let fields = decode_fields(rule, direction, &mut reader, self.provider.as_deref())?;
-                let suffix = if reader.remaining() >= 8 {
-                    if fields.iter().any(|(key, _)| {
-                        matches!(
-                            key.field(),
-                            FieldRef::Payload
-                                | FieldRef::Udp("fid-udp-payload")
-                                | FieldRef::Coap("fid-coap-payload")
-                                | FieldRef::Icmpv6("fid-icmpv6-payload")
-                        )
-                    }) {
-                        return Err(SchcError::InvalidResidue(format!(
-                            "{} trailing residue bits remain",
-                            reader.remaining()
-                        )));
-                    }
-                    if reader.remaining() % 8 != 0 {
-                        return Err(SchcError::InvalidResidue(format!(
-                            "unread packet suffix is not byte aligned: {} trailing bits remain",
-                            compressed.len() * 8 - reader.position()
-                        )));
-                    }
-                    Some(reader.read_bytes_padded(reader.remaining())?)
+                if rule.fields().is_empty() {
+                    decode_no_compression_payload(&mut reader)
                 } else {
-                    validate_padding(&mut reader)?;
-                    None
-                };
-                match suffix {
-                    Some(suffix) => crate::packet::builder::reconstruct_packet_with_suffix(
-                        direction, &fields, &suffix,
-                    ),
-                    None => crate::packet::builder::reconstruct_packet(direction, &fields),
+                    let direction = inverse_direction(position);
+                    let fields =
+                        decode_fields(rule, direction, &mut reader, self.provider.as_deref())?;
+                    let suffix = if reader.remaining() >= 8 {
+                        if fields.iter().any(|(key, _)| {
+                            matches!(
+                                key.field(),
+                                FieldRef::Payload
+                                    | FieldRef::Udp("fid-udp-payload")
+                                    | FieldRef::Coap("fid-coap-payload")
+                                    | FieldRef::Icmpv6("fid-icmpv6-payload")
+                            )
+                        }) {
+                            return Err(SchcError::InvalidResidue(format!(
+                                "{} trailing residue bits remain",
+                                reader.remaining()
+                            )));
+                        }
+                        if reader.remaining() % 8 != 0 {
+                            return Err(SchcError::InvalidResidue(format!(
+                                "unread packet suffix is not byte aligned: {} trailing bits remain",
+                                compressed.len() * 8 - reader.position()
+                            )));
+                        }
+                        Some(reader.read_bytes_padded(reader.remaining())?)
+                    } else {
+                        validate_padding(&mut reader)?;
+                        None
+                    };
+                    match suffix {
+                        Some(suffix) => crate::packet::builder::reconstruct_packet_with_suffix(
+                            direction, &fields, &suffix,
+                        ),
+                        None => crate::packet::builder::reconstruct_packet(direction, &fields),
+                    }
                 }
             }
             crate::RuleNature::NoCompression => decode_no_compression_payload(&mut reader),

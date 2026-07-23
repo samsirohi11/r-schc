@@ -163,39 +163,41 @@ impl Compressor {
         let packet = traversal.packet;
         let node = &self.tree.nodes()[node_index];
         if let (Some(rule_id), Some(rule_order)) = (node.rule_id, node.rule_order) {
-            let nature = self
-                .context
-                .rules()
-                .rules()
-                .get(rule_order)
-                .map_or(RuleNature::Compression, Rule::nature);
+            let rule = self.context.rules().rules().get(rule_order);
+            let nature = rule.map_or(RuleNature::Compression, Rule::nature);
             match nature {
                 RuleNature::Compression | RuleNature::Management => {
-                    let reconstructed =
-                        crate::packet::builder::reconstruct_packet(direction, &state.fields);
-                    let suffix = if reconstructed
-                        .as_ref()
-                        .is_ok_and(|bytes| bytes.as_slice() == packet)
-                    {
-                        Some(Vec::new())
+                    if rule.is_some_and(|rule| rule.fields().is_empty()) {
+                        traversal
+                            .candidates
+                            .push(no_compression_candidate(rule_order, rule_id, packet)?);
                     } else {
-                        carry_through_suffix(packet, state)?
-                    };
-                    if let Some(suffix) = suffix {
-                        let mut writer = BitWriter::new();
-                        writer.write_bits(rule_id.value(), rule_id.bit_len())?;
-                        append_bits(&mut writer, &state.residue)?;
-                        for byte in suffix {
-                            writer.write_bits(u64::from(byte), 8)?;
+                        let reconstructed =
+                            crate::packet::builder::reconstruct_packet(direction, &state.fields);
+                        let suffix = if reconstructed
+                            .as_ref()
+                            .is_ok_and(|bytes| bytes.as_slice() == packet)
+                        {
+                            Some(Vec::new())
+                        } else {
+                            carry_through_suffix(packet, state)?
+                        };
+                        if let Some(suffix) = suffix {
+                            let mut writer = BitWriter::new();
+                            writer.write_bits(rule_id.value(), rule_id.bit_len())?;
+                            append_bits(&mut writer, &state.residue)?;
+                            for byte in suffix {
+                                writer.write_bits(u64::from(byte), 8)?;
+                            }
+                            traversal.candidates.push(Candidate {
+                                rule_order,
+                                datagram: CompressedDatagram {
+                                    bytes: writer.to_vec(),
+                                    bit_len: writer.bit_len(),
+                                    rule_id,
+                                },
+                            });
                         }
-                        traversal.candidates.push(Candidate {
-                            rule_order,
-                            datagram: CompressedDatagram {
-                                bytes: writer.to_vec(),
-                                bit_len: writer.bit_len(),
-                                rule_id,
-                            },
-                        });
                     }
                 }
                 RuleNature::NoCompression => {
